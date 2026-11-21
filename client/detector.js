@@ -29,6 +29,7 @@ export class MomentDetector {
     this.runMax = 0;
     this.runPrevAvg = 0;
     this.lastVoiceAt = now;
+    this.lastAudioVoiceAt = now; // last time the MICROPHONE heard a voice (words do not count)
     this.silenceFired = false;
     this.lastMomentAt = -Infinity;
     this.utter = [];
@@ -50,7 +51,8 @@ export class MomentDetector {
   fire(type, detail, now) {
     if (!this.enabled || this.cooldownLeft(now) > 0) return false;
     this.lastMomentAt = now;
-    this.onMoment({ type, ...detail, at: now });
+    // detectMs: how long after the player's last sound we decided to roast (for the speed log)
+    this.onMoment({ type, ...detail, at: now, detectMs: Math.max(0, Math.round(now - this.lastAudioVoiceAt)) });
     return true;
   }
 
@@ -61,6 +63,7 @@ export class MomentDetector {
 
     if (rms > o.voiceRms) {
       this.lastVoiceAt = now;
+      this.lastAudioVoiceAt = now;
       this.silenceFired = false;
       if (rms < 0.45) {
         // learn fast during the first ~2 s of talking, slowly afterwards

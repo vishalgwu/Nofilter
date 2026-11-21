@@ -39,6 +39,24 @@ The detector pauses while a roast is playing, so RoastCast never roasts its own 
 
 **Day 3:** the humor. The roast writer is built from a written humor guide ([humor/guide.md](humor/guide.md): voice, the six ingredients, the three levels, the hard rules) and 30 hand-written example roasts ([humor/moments.json](humor/moments.json): 5 for each of crash, scream, silence, lucky win, rage quit and panic, each with its own joke shapes). Every moment is classified into one of those types (or "general"), so a crash and a long silence get different kinds of jokes. For each moment the model writes **three candidates in one call**, anything over 15 words (or lifted from the examples) is dropped, and a quick **pick step** chooses the funniest. The server remembers the session's earlier moments and roasts, so callbacks ("third time in the ocean") can happen. The page shows all three takes and which one won.
 
+**Day 4:** speed. Every roast is timed step by step (`data/timing-log.jsonl`), and `npm run speed` turns the log into the speed table ([docs/speed-table.md](docs/speed-table.md)). What changed:
+
+- **Fast lane.** The moment a roast is triggered, an instant reaction sound (gasp, oooh, laugh, crickets...) plays from memory while the roast is still being written. The ten sounds in `client/sounds/` are made by `scripts/make-sounds.mjs` with ElevenLabs sound effects.
+- **Self-pick.** The writer now writes three takes *and* picks its own best in one call, instead of a second judge call. The judge version is still available as `?mode=best` for comparison. A **Quick** style (one roast) is available in the page.
+- **Voice starts early.** The server starts the text-to-speech request as soon as the roast text exists, so it overlaps the trip to the browser, and replays are served from memory.
+- **Warm start.** The server resolves the voice and opens connections on startup, and the page triggers the same on load.
+- **Measured and rejected:** streaming text into ElevenLabs over a WebSocket (first audio was slower than plain HTTP), prompt caching (cached 90% of the prompt but changed latency by about 2%), a keep-alive HTTP agent (no measurable gain), and a different small model (no faster).
+
+Measured with 37 roasts through the real page (median, from the trigger to the first word of the roast):
+
+| Style | Roast starts speaking (p50) | p90 |
+| --- | --- | --- |
+| Quick (one roast) | 0.76 s | 1.00 s |
+| Best of 3, self-pick (default) | 1.02 s | 1.26 s |
+| Best of 3 + separate judge (Day 3) | 1.39 s | 1.57 s |
+
+The biggest remaining delay is not the roast: when you talk, it takes about 0.7 s (median, only 4 samples) after your last word before RoastCast decides you have finished.
+
 To tune the humor, edit the guide or the examples and run `npm run eval`, which prints every candidate and the pick for a spread of moments. Real quality is measured with friends' laugh scores (Day 5), which the page logs to `data/timing-log.jsonl` with the candidates.
 
 ## What success looks like

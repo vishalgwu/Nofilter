@@ -3,6 +3,7 @@
 // Also: mic permission + live input-level meter (ready for Day 2).
 
 import { MomentDetector } from './detector.js';
+import { SOUNDS, pickReaction } from './fastlane.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -27,8 +28,9 @@ const el = {
   moment: $('moment'), count: $('count'), chips: $('chips'), seg: $('seg'), levelHint: $('levelHint'),
   roastBtn: $('roastBtn'), micBtn: $('micBtn'), micLabel: $('micLabel'), micStatus: $('micStatus'),
   meter: $('meter'), meterWrap: $('meterWrap'), stage: $('stage'), liveText: $('liveText'),
-  roast: $('roast'), vWrite: $('vWrite'), vVoice: $('vVoice'), vFirst: $('vFirst'),
-  statWrite: $('statWrite'), statVoice: $('statVoice'), statFirst: $('statFirst'), budgetBar: $('budgetBar'),
+  roast: $('roast'), vReact: $('vReact'), vWrite: $('vWrite'), vVoice: $('vVoice'), vFirst: $('vFirst'),
+  statReact: $('statReact'), statWrite: $('statWrite'), statVoice: $('statVoice'), statFirst: $('statFirst'),
+  budgetBar: $('budgetBar'), modeSeg: $('modeSeg'), modeHint: $('modeHint'),
   rate: $('rate'), replayBtn: $('replayBtn'), copyBtn: $('copyBtn'),
   historyWrap: $('historyWrap'), hist: $('hist'), histCount: $('histCount'),
   status: $('status'), statusText: $('statusText'), toast: $('toast'), kbdHint: $('kbdHint'),
@@ -38,6 +40,9 @@ const el = {
 const state = {
   level: 'spicy', busy: false, current: null, history: [], toastTimer: 0, transcript: [],
   chipType: null, // the moment type of the quick-pick chip, until the text is edited
+  // How the roast is written: 'self' (best of 3) or 'quick' (one roast). ?mode=best tests the Day 3 judge.
+  mode: ['self', 'quick', 'best'].includes(new URLSearchParams(location.search).get('mode'))
+    ? new URLSearchParams(location.search).get('mode') : 'self',
   // One id per page load: the server uses it to remember running jokes for this session.
   sessionId: (crypto.randomUUID && crypto.randomUUID()) || String(Math.random()).slice(2) + Date.now(),
 };
@@ -80,6 +85,46 @@ function ensureAudioContext() {
     playAnalyser.connect(ctx.destination);
   }
   if (ctx.state === 'suspended') ctx.resume();
+}
+
+// ---------- fast lane: an instant reaction while the roast is still being written ----------
+// The sounds are decoded into memory at page load, so playing one takes a few milliseconds.
+const reactionBuffers = {};
+let lastReaction = null;
+
+async function preloadReactions() {
+  ensureAudioContext(); // created suspended is fine: decoding does not need it running
+  await Promise.all(Object.keys(SOUNDS).map(async (name) => {
+    try {
+      const res = await fetch(`sounds/${name}.mp3`);
+      reactionBuffers[name] = await ctx.decodeAudioData(await res.arrayBuffer());
+    } catch { /* a missing sound just means no reaction for that slot */ }
+  }));
+}
+
+function playReaction(type) {
+  const name = pickReaction(type, lastReaction);
+  const buf = reactionBuffers[name];
+  if (!buf || !ctx) return null;
+  lastReaction = name;
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const gain = ctx.createGain();
+  gain.gain.value = 0.9;
+  src.connect(gain).connect(playAnalyser); // through the analyser so the ring reacts too
+  src.start();
+  return {
+    name,
+    startedAt: performance.now(),
+    ended: new Promise((resolve) => { src.onended = resolve; }),
+    // The roast arrives: fade the reaction out instead of talking over it.
+    fadeOut(ms = 90) {
+      try {
+        gain.gain.setTargetAtTime(0, ctx.currentTime, ms / 3000);
+        src.stop(ctx.currentTime + ms / 1000 + 0.05);
+      } catch { /* already finished */ }
+    },
+  };
 }
 
 // ---------- helpers ----------
@@ -149,6 +194,21 @@ function setLevel(level) {
 }
 el.seg.addEventListener('change', (e) => setLevel(e.target.value));
 setLevel('spicy');
+
+const MODE_INDEX = { self: 0, quick: 1 };
+const MODE_HINTS = {
+  self: 'Writes three takes and keeps its funniest.',
+  quick: 'One take, straight away. Fastest.',
+  best: 'Three takes, then a separate judge picks (slowest, test mode).',
+};
+function setMode(mode) {
+  state.mode = mode;
+  el.modeSeg.style.setProperty('--i', MODE_INDEX[mode] ?? 0);
+  el.modeSeg.querySelectorAll('input').forEach((i) => { i.checked = i.value === mode; });
+  el.modeHint.textContent = MODE_HINTS[mode];
+}
+el.modeSeg.addEventListener('change', (e) => setMode(e.target.value));
+setMode(state.mode);
 updateCount();
 
 // ---------- roast flow ----------
@@ -173,7 +233,7 @@ function afterSpeak() {
   setTimeout(() => { if (!state.busy && audio.paused) armDetector(); }, 1000);
 }
 
-function playRoast(id, t0) {
+function playRoast(id, t0, react = null) {
   ensureAudioContext();
   detector.setEnabled(false, performance.now()); // never roast our own voice
   return new Promise((resolve) => {
@@ -182,8 +242,9 @@ function playRoast(id, t0) {
     const finish = (res) => { if (!done) { done = true; resolve(res); } };
     audio.onplaying = () => {
       const now = performance.now();
+      react?.fadeOut(); // hand over from the reaction to the roast
       setStage('speaking', 'Speaking');
-      finish({ voiceMs: now - tStart, firstSoundMs: now - t0 });
+      finish({ voiceMs: now - tStart, roastStartMs: now - t0 });
     };
     audio.onended = afterSpeak;
     audio.onerror = () => { afterSpeak(); toast('The voice could not play. Check the server log.'); finish(null); };
@@ -196,6 +257,7 @@ function playRoast(id, t0) {
 // roast(moment)  -> roast a moment the detector heard: { type, text?, seconds? }
 async function roast(auto = null) {
   if (state.busy) return;
+  const t0 = performance.now(); // the moment of the trigger: every timing below counts from here
   const typed = !auto;
   const moment = typed ? el.moment.value.trim() : auto.text || '';
   if (typed && moment.length < 3) { toast('Tell me what just happened first.'); el.moment.focus(); return; }
@@ -206,42 +268,57 @@ async function roast(auto = null) {
 
   state.busy = true;
   detector.setEnabled(false, performance.now());
+  ensureAudioContext(); // unlock audio inside the click
+
+  // FAST LANE: the reaction plays before anything slow happens.
+  audio.pause();
+  const react = playReaction(momentType);
+  const reactionMs = react ? Math.round(react.startedAt - t0) : null;
+  if (react) {
+    setStage('speaking', 'Reaction');
+    react.ended.then(() => { if (el.liveText.textContent === 'Reaction') setStage('writing', 'Writing'); });
+  } else {
+    setStage('writing', 'Writing');
+  }
+
   showTrigger(typed ? null : { type: momentType, text: moment, seconds: auto.seconds });
   el.roastBtn.disabled = true;
   el.roastBtn.classList.add('is-loading');
   el.roastBtn.querySelector('.btn-label').textContent = 'Writing';
-  audio.pause();
   el.rate.hidden = true;
-  setStat(el.statWrite, el.vWrite, null); setStat(el.statVoice, el.vVoice, null); setStat(el.statFirst, el.vFirst, null);
+  [[el.statWrite, el.vWrite], [el.statVoice, el.vVoice], [el.statFirst, el.vFirst]].forEach(([n, v]) => setStat(n, v, null));
+  setStat(el.statReact, el.vReact, reactionMs, reactionMs == null ? null : grade(reactionMs, 100, 250));
   el.budgetBar.style.width = '0';
-  setStage('writing', 'Writing');
-  ensureAudioContext(); // unlock audio inside the click
 
-  const t0 = performance.now();
   try {
     const r = await post('/api/roast', {
-      moment, momentType, transcript, seconds: auto?.seconds, level: state.level, sessionId: state.sessionId,
+      moment, momentType, transcript, seconds: auto?.seconds, level: state.level, mode: state.mode,
+      sessionId: state.sessionId,
     });
     renderRoast(r.roast);
     renderTakes(r);
-    setStat(el.statWrite, el.vWrite, r.llmMs, grade(r.llmMs, 1000, 2000));
+    setStat(el.statWrite, el.vWrite, r.llmMs, grade(r.llmMs, 800, 1500));
     el.replayBtn.disabled = false;
     el.copyBtn.disabled = false;
     state.current = { id: r.id, text: r.roast, level: r.level, moment: shownMoment, momentType, llmMs: r.llmMs };
 
-    const t = await playRoast(r.id, t0);
+    const t = await playRoast(r.id, t0, react);
     if (t) {
-      setStat(el.statVoice, el.vVoice, t.voiceMs, grade(t.voiceMs, 600, 1500));
-      setStat(el.statFirst, el.vFirst, t.firstSoundMs, grade(t.firstSoundMs));
-      el.budgetBar.style.width = Math.min(100, (t.firstSoundMs / (LIMIT_MS * 2)) * 100) + '%';
-      Object.assign(state.current, t);
+      setStat(el.statVoice, el.vVoice, t.voiceMs, grade(t.voiceMs, 400, 1000));
+      setStat(el.statFirst, el.vFirst, t.roastStartMs, grade(t.roastStartMs));
+      el.budgetBar.style.width = Math.min(100, (t.roastStartMs / (LIMIT_MS * 2)) * 100) + '%';
+      Object.assign(state.current, t, { firstSoundMs: t.roastStartMs });
       el.rate.hidden = false;
       el.rate.classList.remove('is-done');
       el.rate.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', 'false'));
       addHistory(state.current);
-      log({ type: 'roast', id: r.id, level: r.level, momentType, momentKind: r.type, moment: shownMoment, roast: r.roast,
-        candidates: r.candidates, picked: r.picked, pickedBy: r.pickedBy, candMs: r.candMs, pickMs: r.pickMs,
-        llmMs: r.llmMs, voiceMs: Math.round(t.voiceMs), firstSoundMs: Math.round(t.firstSoundMs) });
+      log({
+        type: 'roast', id: r.id, level: r.level, mode: r.mode, momentType, momentKind: r.type, moment: shownMoment,
+        roast: r.roast, candidates: r.candidates, picked: r.picked, pickedBy: r.pickedBy,
+        detectMs: auto?.detectMs, reactionMs, promptMs: r.promptMs, firstTokenMs: r.firstTokenMs,
+        candMs: r.candMs, pickMs: r.pickMs, llmMs: r.llmMs,
+        voiceMs: Math.round(t.voiceMs), roastStartMs: Math.round(t.roastStartMs),
+      });
     }
   } catch (err) {
     afterSpeak();
@@ -267,14 +344,14 @@ function renderTakes(r) {
     li.appendChild(t);
     if (i === r.picked) {
       const tag = document.createElement('em');
-      tag.textContent = r.candidates.length > 1 ? (r.pickedBy === 'ai' ? 'picked' : 'shortest') : 'only take';
+      tag.textContent = { self: 'its pick', judge: 'judge pick', rule: 'shortest', only: 'only take' }[r.pickedBy] || 'picked';
       li.appendChild(tag);
     }
     list.appendChild(li);
   });
   const n = r.candidates.length;
   $('takesSummary').textContent =
-    `${n} take${n === 1 ? '' : 's'} · ${r.pickMs ? `write ${fmt(r.candMs)} + pick ${fmt(r.pickMs)}` : `write ${fmt(r.candMs)}`}`;
+    `${n} take${n === 1 ? '' : 's'} · ${r.pickMs ? `write ${fmt(r.candMs)} + judge ${fmt(r.pickMs)}` : `write ${fmt(r.candMs)}`}`;
   $('takes').hidden = false;
   $('takes').open = false;
 }
@@ -576,6 +653,10 @@ function draw(ts) {
   requestAnimationFrame(draw);
 }
 requestAnimationFrame(draw);
+
+// ---------- warm up: do the slow one-time work before the first roast ----------
+preloadReactions();
+fetch('/api/warm', { method: 'POST' }).catch(() => {});
 
 // ---------- server status ----------
 async function checkHealth() {

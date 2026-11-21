@@ -100,16 +100,32 @@ const ordinal = (n) => {
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
 };
 
-export function buildUserPrompt(ctx, level, type, session, strict = false) {
+// Roast modes (how many roasts are written and who picks the winner):
+//   self  - three candidates and the writer picks its own best, in ONE call (default, fast)
+//   best  - three candidates, then a separate judge call picks (the Day 3 design, funniest but slowest)
+//   quick - a single roast (fastest)
+export const MODES = ['self', 'best', 'quick'];
+
+export function buildUserPrompt(ctx, level, type, session, strict = false, mode = 'best') {
   const lines = [`Roast level: ${LEVELS[level]}`, `Moment: ${describeMoment(ctx)}`];
   if (ctx.transcript) lines.push(`Heard in the last 30 seconds (oldest first): "${ctx.transcript}"`);
   const memory = session ? session.summary(type) : '';
   if (memory) lines.push(memory);
-  lines.push(
-    `Write 3 different roasts of this moment. Each one uses a different joke shape, is specific to this exact moment, ` +
-      `and is short: ideally 6 to 11 words, never more than ${MAX_WORDS}.`,
-    'Reply with JSON only: {"roasts":["...","...","..."]}',
-  );
+  const short = `is specific to this exact moment, and is short: ideally 6 to 11 words, never more than ${MAX_WORDS}.`;
+  if (mode === 'quick') {
+    lines.push(`Write ONE roast of this moment. It ${short}`, 'Reply with only the roast text, nothing else.');
+  } else if (mode === 'self') {
+    lines.push(
+      `Write 3 different roasts of this moment. Each one uses a different joke shape, ${short}`,
+      'Then choose the funniest one yourself.',
+      'Reply with JSON only: {"roasts":["...","...","..."],"best":1}  (best is 1, 2 or 3)',
+    );
+  } else {
+    lines.push(
+      `Write 3 different roasts of this moment. Each one uses a different joke shape, ${short}`,
+      'Reply with JSON only: {"roasts":["...","...","..."]}',
+    );
+  }
   if (strict) lines.push(`Your last attempt was too long. Every roast must be under 12 words.`);
   return lines.join('\n');
 }
@@ -174,6 +190,23 @@ export function rulePick(list) {
   let best = 0;
   list.forEach((c, i) => { if (countWords(c) < countWords(list[best])) best = i; });
   return best;
+}
+
+// "self" mode: one reply holds the three roasts AND the writer's own choice ("best": 1-3).
+// Returns the usable candidates (within 15 words, no copies) and which one won.
+export function selectSelf(raw) {
+  let best = -1;
+  try {
+    const n = Number(JSON.parse(raw).best);
+    if (Number.isInteger(n)) best = n - 1;
+  } catch { /* not JSON: no stated choice */ }
+  const all = parseCandidates(raw);
+  const keep = dropCopies(validCandidates(all));
+  if (!keep.length) return { candidates: [], picked: -1, pickedBy: 'none' };
+  if (keep.length === 1) return { candidates: keep, picked: 0, pickedBy: 'only' };
+  const at = all[best] ? keep.indexOf(all[best]) : -1;
+  if (at >= 0) return { candidates: keep, picked: at, pickedBy: 'self' };
+  return { candidates: keep, picked: rulePick(keep), pickedBy: 'rule' }; // chosen one was too long or a copy
 }
 
 export function parsePick(raw, count) {

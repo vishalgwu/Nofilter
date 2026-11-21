@@ -26,7 +26,7 @@
       <span class="brand-name">RoastCast</span>
     </a>
     <div class="nav-right">
-      <span class="pill pill-muted"><span class="mono">Stage 1</span><i></i>Day 3</span>
+      <span class="pill pill-muted"><span class="mono">Stage 1</span><i></i>Day 4</span>
       <span class="status" id="status" data-state="checking" role="status" aria-live="polite">
         <span class="dot"></span><span id="statusText">Checking server</span>
       </span>
@@ -61,6 +61,13 @@
           <label><input type="radio" name="level" value="gentle"><span>Gentle</span></label>
           <label><input type="radio" name="level" value="spicy" checked><span>Spicy</span></label>
           <label><input type="radio" name="level" value="savage"><span>Savage</span></label>
+        </div>
+
+        <div class="row-label row-gap"><span>Roast style</span><span class="muted" id="modeHint"></span></div>
+        <div class="seg" id="modeSeg" role="radiogroup" aria-label="Roast style" style="--n:2; --i:0">
+          <span class="seg-thumb" aria-hidden="true"></span>
+          <label><input type="radio" name="mode" value="self" checked><span>Best of 3</span></label>
+          <label><input type="radio" name="mode" value="quick"><span>Quick</span></label>
         </div>
 
         <div class="actions">
@@ -116,9 +123,10 @@
         </details>
 
         <div class="stats" aria-label="Speed log">
+          <div class="stat" id="statReact"><span class="stat-k">Reaction</span><span class="stat-v mono" id="vReact">--</span></div>
           <div class="stat" id="statWrite"><span class="stat-k">Write</span><span class="stat-v mono" id="vWrite">--</span></div>
           <div class="stat" id="statVoice"><span class="stat-k">Voice</span><span class="stat-v mono" id="vVoice">--</span></div>
-          <div class="stat stat-main" id="statFirst"><span class="stat-k">First sound</span><span class="stat-v mono" id="vFirst">--</span></div>
+          <div class="stat stat-main" id="statFirst"><span class="stat-k">Roast starts</span><span class="stat-v mono" id="vFirst">--</span></div>
         </div>
         <div class="budget" aria-hidden="true"><span class="budget-bar" id="budgetBar"></span><span class="budget-mark"></span></div>
         <div class="budget-legend mono tiny"><span>0s</span><span>1.5s goal</span><span>3s limit</span></div>
