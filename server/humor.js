@@ -185,6 +185,16 @@ export function dropCopies(list) {
   return fresh.length ? fresh : list;
 }
 
+// Tired phrases the humor guide asks the model to avoid. It still slips one in now and then,
+// so drop those candidates too (again only if a fresher one is left).
+const STOCK_RE = /\b(official ceremony|(noise )?complaint|masterclass|npcs?|wizardry|career in|career path|filed for divorce)\b/i;
+export const isStock = (c) => STOCK_RE.test(c);
+
+export function dropStock(list) {
+  const fresh = list.filter((c) => !isStock(c));
+  return fresh.length ? fresh : list;
+}
+
 // Fallback when the pick step fails: the shortest candidate wins (first one on a tie).
 export function rulePick(list) {
   let best = 0;
@@ -201,7 +211,7 @@ export function selectSelf(raw) {
     if (Number.isInteger(n)) best = n - 1;
   } catch { /* not JSON: no stated choice */ }
   const all = parseCandidates(raw);
-  const keep = dropCopies(validCandidates(all));
+  const keep = dropStock(dropCopies(validCandidates(all)));
   if (!keep.length) return { candidates: [], picked: -1, pickedBy: 'none' };
   if (keep.length === 1) return { candidates: keep, picked: 0, pickedBy: 'only' };
   const at = all[best] ? keep.indexOf(all[best]) : -1;

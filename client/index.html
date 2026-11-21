@@ -26,7 +26,7 @@
       <span class="brand-name">RoastCast</span>
     </a>
     <div class="nav-right">
-      <span class="pill pill-muted"><span class="mono">Stage 1</span><i></i>Day 4</span>
+      <span class="pill pill-muted"><span class="mono">Stage 1</span><i></i>Day 5</span>
       <span class="status" id="status" data-state="checking" role="status" aria-live="polite">
         <span class="dot"></span><span id="statusText">Checking server</span>
       </span>
@@ -38,6 +38,18 @@
       <span class="eyebrow"><span class="spark"></span>Live AI roaster</span>
       <h1>Mess up. <span class="grad">Get roasted.</span><br>Laugh out loud.</h1>
       <p class="lede">Tell RoastCast what just happened. It answers in seconds with a short, specific roast, spoken out loud. Teasing the play, never the person.</p>
+    </section>
+
+    <section class="testbar" id="testbar" hidden aria-label="Test session">
+      <label class="tb-field" for="tester">
+        <span>Tester</span>
+        <input id="tester" type="text" maxlength="30" autocomplete="off" placeholder="Your name">
+      </label>
+      <div class="tb-session">
+        <span class="mono" id="sessionLabel">Session 1</span>
+        <span class="mono tb-stats" id="sessionStats">0/0 rated</span>
+      </div>
+      <button class="icon-btn" id="newSession" type="button">New session</button>
     </section>
 
     <section class="studio" aria-label="RoastCast studio">

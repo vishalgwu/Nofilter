@@ -57,6 +57,13 @@ Measured with 37 roasts through the real page (median, from the trigger to the f
 
 The biggest remaining delay is not the roast: when you talk, it takes about 0.7 s (median, only 4 samples) after your last word before RoastCast decides you have finished.
 
+**Day 5:** testing with friends. The full plan is in [docs/day5-test-guide.md](docs/day5-test-guide.md): 10 friends, 3 sessions each, every roast scored 0 to 3. What was added to make that work:
+
+- **Tester mode.** Open the page with `?test=1`: a Tester box and a session counter appear, and every roast and score is logged under that name and session. Every roast in the session list has its own 0-3 buttons.
+- **`npm run laughs`.** Turns the log into the laugh report: the Stage 1 check (average 2.0 or more, 90% of roasts under 3 s), scores by moment type, level, style and tester, and the weakest type with its best and worst roasts. `--winners` saves every score-3 roast for Stage 3 training, `--write` saves `docs/laugh-report.md`.
+- **Sharing safely.** With `ACCESS_CODE` set in `.env`, the API and the microphone only work for people who opened the link ending in `?code=...`. Roasts are capped at 20 a minute and open microphones at 5 (`MAX_ROASTS_PER_MIN`, `MAX_MICS`).
+- **Cliche filter.** Roasts that use the stock phrases the humor guide bans ("official ceremony", "filed a complaint", "masterclass", ...) are dropped in code when a fresher take is available.
+
 To tune the humor, edit the guide or the examples and run `npm run eval`, which prints every candidate and the pick for a spread of moments. Real quality is measured with friends' laugh scores (Day 5), which the page logs to `data/timing-log.jsonl` with the candidates.
 
 ## What success looks like

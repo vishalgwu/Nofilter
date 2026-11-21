@@ -4,7 +4,7 @@
 import { chatStream } from './llm.js';
 import {
   MAX_WORDS, MODES, resolveType, buildSystemPrompt, buildUserPrompt, PICK_SYSTEM, buildPickPrompt,
-  parseCandidates, validCandidates, dropCopies, selectSelf, parsePick, rulePick, capWords, cleanRoast, describeMoment,
+  parseCandidates, validCandidates, dropCopies, dropStock, selectSelf, parsePick, rulePick, capWords, cleanRoast, describeMoment,
 } from './humor.js';
 
 const MODEL = () => process.env.OPENAI_MODEL || 'gpt-4.1-mini'; // fast, non-reasoning
@@ -19,10 +19,10 @@ function interpret(mode, raw) {
   if (mode === 'quick') {
     // A single roast as plain text (if the model sent JSON anyway, take its first roast).
     const text = raw.trim().startsWith('{') ? parseCandidates(raw)[0] || '' : cleanRoast(raw);
-    const keep = text ? dropCopies(validCandidates([text])) : [];
+    const keep = text ? dropStock(dropCopies(validCandidates([text]))) : [];
     return keep.length ? { candidates: keep, picked: 0, pickedBy: 'only' } : { candidates: [], picked: -1, pickedBy: 'none', loose: text };
   }
-  const keep = dropCopies(validCandidates(parseCandidates(raw)));
+  const keep = dropStock(dropCopies(validCandidates(parseCandidates(raw))));
   return { candidates: keep, picked: keep.length ? 0 : -1, pickedBy: keep.length > 1 ? 'pending' : 'only', loose: parseCandidates(raw)[0] };
 }
 

@@ -13,7 +13,8 @@
     "dev": "node --watch --env-file=.env server/index.js",
     "test": "node --test \"test/*.test.js\"",
     "eval": "node --env-file=.env scripts/humor-eval.mjs",
-    "speed": "node scripts/speed-report.mjs"
+    "speed": "node scripts/speed-report.mjs",
+    "laughs": "node scripts/laugh-report.mjs"
   },
   "dependencies": {
     "ws": "^8.23.0"

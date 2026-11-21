@@ -35,11 +35,27 @@ const el = {
   historyWrap: $('historyWrap'), hist: $('hist'), histCount: $('histCount'),
   status: $('status'), statusText: $('statusText'), toast: $('toast'), kbdHint: $('kbdHint'),
   autoToggle: $('autoToggle'), cooldownTag: $('cooldownTag'), captions: $('captions'), trigger: $('trigger'),
+  testbar: $('testbar'), tester: $('tester'), sessionLabel: $('sessionLabel'), newSession: $('newSession'),
+  sessionStats: $('sessionStats'),
 };
+
+// localStorage can be blocked (private windows), so every use is wrapped.
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch { /* ignore */ } },
+  del(k) { try { localStorage.removeItem(k); } catch { /* ignore */ } },
+};
+// Test sessions (Day 5): open the page with ?test=1 to show the tester bar. ?test=0 turns it off again.
+const testParam = new URLSearchParams(location.search).get('test');
+if (testParam === '1') store.set('rc_test', '1');
+if (testParam === '0') store.del('rc_test');
 
 const state = {
   level: 'spicy', busy: false, current: null, history: [], toastTimer: 0, transcript: [],
   chipType: null, // the moment type of the quick-pick chip, until the text is edited
+  testMode: store.get('rc_test') === '1',
+  tester: store.get('rc_tester') || '',
+  session: 1, // set below from the tester's saved session number
   // How the roast is written: 'self' (best of 3) or 'quick' (one roast). ?mode=best tests the Day 3 judge.
   mode: ['self', 'quick', 'best'].includes(new URLSearchParams(location.search).get('mode'))
     ? new URLSearchParams(location.search).get('mode') : 'self',
@@ -150,7 +166,10 @@ async function post(url, body) {
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
 }
-const log = (row) => post('/api/log', row).catch(() => {});
+// Every log row carries who was testing and which session, so the laugh report can group them.
+const log = (row) => post('/api/log', {
+  ...row, ...(state.tester ? { tester: state.tester } : {}), session: state.session, sessionId: state.sessionId,
+}).catch(() => {});
 
 // ---------- compose UI ----------
 MOMENTS.forEach((m) => {
@@ -261,6 +280,7 @@ async function roast(auto = null) {
   const typed = !auto;
   const moment = typed ? el.moment.value.trim() : auto.text || '';
   if (typed && moment.length < 3) { toast('Tell me what just happened first.'); el.moment.focus(); return; }
+  if (needTester()) return;
   const momentType = typed ? state.chipType || 'typed' : auto.type;
   const shownMoment = typed ? moment : auto.type === 'speech' ? moment
     : auto.type === 'silence' ? `Silent for ${auto.seconds}s` : MOMENT_LABEL[auto.type];
@@ -308,9 +328,7 @@ async function roast(auto = null) {
       setStat(el.statFirst, el.vFirst, t.roastStartMs, grade(t.roastStartMs));
       el.budgetBar.style.width = Math.min(100, (t.roastStartMs / (LIMIT_MS * 2)) * 100) + '%';
       Object.assign(state.current, t, { firstSoundMs: t.roastStartMs });
-      el.rate.hidden = false;
-      el.rate.classList.remove('is-done');
-      el.rate.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', 'false'));
+      syncStageRating(state.current); // shows the "Did it make you laugh?" row, unscored
       addHistory(state.current);
       log({
         type: 'roast', id: r.id, level: r.level, mode: r.mode, momentType, momentKind: r.type, moment: shownMoment,
@@ -388,15 +406,35 @@ el.copyBtn.addEventListener('click', async () => {
   catch { toast('Could not copy.'); }
 });
 
+// ----- laugh scores -----
+// One place sets a score, so the stage row, the session list and the log always agree.
+const SCORE_WORDS = ['no laugh', 'a smile', 'a real laugh', 'laughed out loud'];
+
+function syncStageRating(item) {
+  el.rate.hidden = false;
+  el.rate.classList.toggle('is-done', item.laughScore != null);
+  el.rate.querySelectorAll('button').forEach((b) =>
+    b.setAttribute('aria-pressed', String(item.laughScore != null && Number(b.dataset.score) === item.laughScore)));
+}
+
+function setRating(item, score) {
+  item.laughScore = score;
+  item.ratingEl?.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(Number(b.dataset.score) === score)));
+  if (state.current === item) syncStageRating(item);
+  log({ type: 'laugh', id: item.id, laughScore: score });
+  updateSessionStats();
+}
+
 el.rate.addEventListener('click', (e) => {
   const b = e.target.closest('button[data-score]');
-  if (!b || !state.current) return;
-  const score = Number(b.dataset.score);
-  el.rate.querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
-  el.rate.classList.add('is-done');
-  state.current.laughScore = score;
-  log({ type: 'laugh', id: state.current.id, laughScore: score });
+  if (b && state.current) setRating(state.current, Number(b.dataset.score));
 });
+
+function updateSessionStats() {
+  const rated = state.history.filter((h) => h.laughScore != null);
+  const avg = rated.length ? (rated.reduce((a, h) => a + h.laughScore, 0) / rated.length).toFixed(1) : '-';
+  el.sessionStats.textContent = `${rated.length}/${state.history.length} rated · avg ${avg}`;
+}
 
 function addHistory(item) {
   state.history.unshift(item);
@@ -410,17 +448,73 @@ function addHistory(item) {
   const w = document.createElement('span'); w.className = 'mono'; w.textContent = `first sound ${fmt(item.firstSoundMs)}`;
   const mo = document.createElement('span'); mo.textContent = item.moment.length > 54 ? item.moment.slice(0, 54) + '...' : item.moment;
   m.append(tag, w, mo);
-  left.append(t, m);
+
+  // every roast can be scored 0-3, not only the latest one
+  const rate = document.createElement('div');
+  rate.className = 'hist-rate';
+  rate.setAttribute('role', 'group');
+  rate.setAttribute('aria-label', 'Laugh score');
+  const lab = document.createElement('span');
+  lab.textContent = 'Laugh?';
+  rate.appendChild(lab);
+  for (let s = 0; s <= 3; s++) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.dataset.score = String(s);
+    b.textContent = String(s);
+    b.setAttribute('aria-pressed', 'false');
+    b.setAttribute('aria-label', `Rate ${s}: ${SCORE_WORDS[s]}`);
+    b.addEventListener('click', () => setRating(item, s));
+    rate.appendChild(b);
+  }
+  item.ratingEl = rate;
+  left.append(t, m, rate);
+
   const btn = document.createElement('button');
   btn.className = 'icon-btn'; btn.type = 'button'; btn.textContent = 'Play';
   btn.addEventListener('click', () => {
     state.current = item;
     renderRoast(item.text);
+    syncStageRating(item);
     playRoast(item.id, performance.now());
   });
   li.append(left, btn);
   el.hist.prepend(li);
+  updateSessionStats();
 }
+
+// ----- test sessions (Day 5): who is testing, and which session -----
+function applyTester(name) {
+  state.tester = name.trim().slice(0, 30);
+  store.set('rc_tester', state.tester);
+  state.session = Number(store.get('rc_session_' + state.tester)) || 1;
+  updateSessionUI();
+}
+function updateSessionUI() {
+  el.sessionLabel.textContent = `Session ${state.session}`;
+  updateSessionStats();
+}
+function newSession() {
+  state.session += 1;
+  store.set('rc_session_' + state.tester, String(state.session));
+  // a new session forgets the running jokes too, like a new group of friends would
+  state.sessionId = (crypto.randomUUID && crypto.randomUUID()) || String(Math.random()).slice(2) + Date.now();
+  state.history = [];
+  state.current = null;
+  state.transcript = [];
+  el.hist.innerHTML = '';
+  el.historyWrap.hidden = true;
+  el.rate.hidden = true;
+  updateSessionUI();
+}
+el.tester.addEventListener('change', () => applyTester(el.tester.value));
+el.newSession.addEventListener('click', newSession);
+const needTester = () => {
+  if (!state.testMode || state.tester) return false;
+  toast('Type your name in the Tester box first, so your ratings are saved under it.');
+  el.tester.focus();
+  return true;
+};
 
 // ---------- microphone, live transcription, level meter ----------
 // mic -> AudioWorklet (16 kHz PCM, 100 ms chunks + loudness) -> WebSocket -> server -> Deepgram
@@ -523,6 +617,7 @@ function onFrame({ pcm, rms, peak }) {
 
 async function startMic() {
   if (mic.stream) return;
+  if (needTester()) return;
   el.micBtn.disabled = true;
   let stream;
   try {
@@ -654,6 +749,12 @@ function draw(ts) {
 }
 requestAnimationFrame(draw);
 
+// ---------- test bar ----------
+el.testbar.hidden = !state.testMode;
+el.tester.value = state.tester;
+state.session = Number(store.get('rc_session_' + state.tester)) || 1;
+updateSessionUI();
+
 // ---------- warm up: do the slow one-time work before the first roast ----------
 preloadReactions();
 fetch('/api/warm', { method: 'POST' }).catch(() => {});
@@ -662,7 +763,11 @@ fetch('/api/warm', { method: 'POST' }).catch(() => {});
 async function checkHealth() {
   try {
     const h = await (await fetch('/api/health', { cache: 'no-store' })).json();
-    if (!h.openai) { el.status.dataset.state = 'bad'; el.statusText.textContent = 'OPENAI_API_KEY missing'; }
+    if (h.authorized === false) {
+      el.status.dataset.state = 'bad';
+      el.statusText.textContent = 'Access code needed';
+      toast('This page is locked. Open the link your host sent you (it ends with ?code=...).');
+    } else if (!h.openai) { el.status.dataset.state = 'bad'; el.statusText.textContent = 'OPENAI_API_KEY missing'; }
     else if (!h.deepgram) { el.status.dataset.state = 'warn'; el.statusText.textContent = 'DEEPGRAM_API_KEY missing'; }
     else if (!h.elevenlabs) { el.status.dataset.state = 'ok'; el.statusText.textContent = 'Ready (OpenAI voice)'; }
     else { el.status.dataset.state = 'ok'; el.statusText.textContent = 'Ready'; }
