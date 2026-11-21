@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>RoastCast - a live AI voice that roasts you while you play</title>
+  <meta name="description" content="RoastCast listens to you play and answers in seconds with a funny, well-timed roast.">
+  <meta name="theme-color" content="#07070a">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%23ffb347'/%3E%3Cstop offset='1' stop-color='%23ff3d81'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='9' fill='url(%23g)'/%3E%3Cpath d='M9 19c2-6 4-6 5 0s3 6 5-2 2-4 4 0' stroke='%2307070a' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="bg" aria-hidden="true">
+    <span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span>
+    <span class="grid"></span><span class="noise"></span>
+  </div>
+
+  <header class="nav">
+    <a class="brand" href="/" aria-label="RoastCast home">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" width="22" height="22"><path d="M5 19c3-9 6-9 8 0s4 9 7-3 3-6 7 0" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+      </span>
+      <span class="brand-name">RoastCast</span>
+    </a>
+    <div class="nav-right">
+      <span class="pill pill-muted"><span class="mono">Stage 1</span><i></i>Day 1</span>
+      <span class="status" id="status" data-state="checking" role="status" aria-live="polite">
+        <span class="dot"></span><span id="statusText">Checking server</span>
+      </span>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="hero">
+      <span class="eyebrow"><span class="spark"></span>Live AI roaster</span>
+      <h1>Mess up. <span class="grad">Get roasted.</span><br>Laugh out loud.</h1>
+      <p class="lede">Tell RoastCast what just happened. It answers in seconds with a short, specific roast, spoken out loud. Teasing the play, never the person.</p>
+    </section>
+
+    <section class="studio" aria-label="RoastCast studio">
+      <!-- Compose -->
+      <div class="card compose">
+        <div class="card-head">
+          <h2>What just happened?</h2>
+          <span class="mono tiny" id="count" aria-live="off">0 / 200</span>
+        </div>
+
+        <label class="sr-only" for="moment">Describe the moment</label>
+        <div class="field">
+          <textarea id="moment" rows="3" maxlength="200" placeholder="I drove straight into the ocean. Again."></textarea>
+        </div>
+
+        <div class="chips" role="group" aria-label="Quick moments" id="chips"></div>
+
+        <div class="row-label"><span>Roast level</span><span class="muted" id="levelHint"></span></div>
+        <div class="seg" id="seg" role="radiogroup" aria-label="Roast level" style="--i:1">
+          <span class="seg-thumb" aria-hidden="true"></span>
+          <label><input type="radio" name="level" value="gentle"><span>Gentle</span></label>
+          <label><input type="radio" name="level" value="spicy" checked><span>Spicy</span></label>
+          <label><input type="radio" name="level" value="savage"><span>Savage</span></label>
+        </div>
+
+        <div class="actions">
+          <button class="btn btn-primary" id="roastBtn" type="button">
+            <span class="btn-label">Roast me</span>
+            <span class="spinner" aria-hidden="true"></span>
+            <kbd class="kbd" id="kbdHint">Ctrl&nbsp;&#8629;</kbd>
+          </button>
+          <button class="btn btn-ghost" id="micBtn" type="button" aria-pressed="false">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Zm7 9a7 7 0 0 1-14 0m7 7v3"/></svg>
+            <span id="micLabel">Start listening</span>
+          </button>
+        </div>
+
+        <div class="meter-wrap" id="meterWrap" data-on="false">
+          <div class="meter" id="meter" aria-hidden="true"></div>
+          <span class="mono tiny" id="micStatus">Mic off</span>
+        </div>
+      </div>
+
+      <!-- Stage -->
+      <div class="card stage" id="stage" data-state="idle">
+        <div class="card-head">
+          <h2>On air</h2>
+          <span class="live" id="liveTag"><span class="dot"></span><span id="liveText">Idle</span></span>
+        </div>
+
+        <div class="viz-wrap">
+          <canvas id="viz" aria-hidden="true"></canvas>
+          <div class="roast" id="roast" aria-live="polite">
+            <p class="roast-empty" id="roastEmpty">Your roast shows up here.</p>
+          </div>
+        </div>
+
+        <div class="stats" aria-label="Speed log">
+          <div class="stat" id="statWrite"><span class="stat-k">Write</span><span class="stat-v mono" id="vWrite">--</span></div>
+          <div class="stat" id="statVoice"><span class="stat-k">Voice</span><span class="stat-v mono" id="vVoice">--</span></div>
+          <div class="stat stat-main" id="statFirst"><span class="stat-k">First sound</span><span class="stat-v mono" id="vFirst">--</span></div>
+        </div>
+        <div class="budget" aria-hidden="true"><span class="budget-bar" id="budgetBar"></span><span class="budget-mark"></span></div>
+        <div class="budget-legend mono tiny"><span>0s</span><span>1.5s goal</span><span>3s limit</span></div>
+
+        <div class="stage-actions">
+          <div class="rate" id="rate" hidden>
+            <span class="muted tiny">Did it make you laugh?</span>
+            <div class="rate-btns" role="group" aria-label="Laugh score">
+              <button type="button" data-score="0" aria-label="0, no laugh">0</button>
+              <button type="button" data-score="1" aria-label="1, a smile">1</button>
+              <button type="button" data-score="2" aria-label="2, a real laugh">2</button>
+              <button type="button" data-score="3" aria-label="3, laughed out loud">3</button>
+            </div>
+          </div>
+          <div class="mini-actions">
+            <button class="icon-btn" id="replayBtn" type="button" disabled>
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5"/></svg>Replay
+            </button>
+            <button class="icon-btn" id="copyBtn" type="button" disabled>
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M9 9h10v10H9zM5 15V5h10"/></svg>Copy
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="history" id="historyWrap" hidden aria-label="This session">
+      <div class="card-head"><h2>This session</h2><span class="mono tiny" id="histCount"></span></div>
+      <ol class="hist" id="hist"></ol>
+    </section>
+
+    <section class="how" aria-label="How it works">
+      <div class="how-item"><span class="mono num">01</span><h3>You describe it</h3><p>Type what happened, or pick a moment. Live listening comes on Day 2.</p></div>
+      <div class="how-item"><span class="mono num">02</span><h3>It writes one roast</h3><p>Fifteen words or fewer, specific to the exact moment, tuned to your level.</p></div>
+      <div class="how-item"><span class="mono num">03</span><h3>It says it out loud</h3><p>A streamed voice starts speaking right away. First sound target: under 3 seconds.</p></div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span>RoastCast</span><span class="sep"></span><span>Roasts the play, never the person.</span>
+  </footer>
+
+  <div class="toast" id="toast" role="alert" hidden></div>
+  <script src="app.js" type="module"></script>
+</body>
+</html>

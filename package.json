@@ -1,0 +1,15 @@
+{
+  "name": "roastcast",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A live AI voice that makes people laugh while they play.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20.6"
+  },
+  "scripts": {
+    "start": "node --env-file=.env server/index.js",
+    "dev": "node --watch --env-file=.env server/index.js"
+  }
+}

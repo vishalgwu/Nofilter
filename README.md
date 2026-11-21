@@ -6,6 +6,21 @@ RoastCast is a web app that listens to a player or streamer in real time and ans
 
 > **Status:** Planning. The repository currently contains only the project plan ([RoastCast_Project_Plan.pdf](RoastCast_Project_Plan.pdf)). Everything below describes the intended design, and all speed figures are planning targets, not measurements.
 
+## Run it locally (Stage 1, Day 1)
+
+Requires Node.js 20.6 or newer. No npm install needed (zero dependencies).
+
+1. Copy `.env.example` to `.env` and fill in `OPENAI_API_KEY`, `ELEVENLABS_API_KEY` and `DEEPGRAM_API_KEY`.
+2. Start the server:
+
+   ```
+   npm start
+   ```
+
+3. Open http://localhost:3000, type (or pick) a moment, choose a roast level and press **Roast me**.
+
+Day 1 covers typed moments, the roast writer (OpenAI, 15 words max), a streamed voice (ElevenLabs, with OpenAI TTS as fallback), the mic permission and live level meter, and a per-roast speed log written to `data/timing-log.jsonl`. Live speech-to-text (Deepgram) arrives on Day 2.
+
 ## What success looks like
 
 - A stranger opens the link, plays for two minutes, and laughs out loud at least once.
