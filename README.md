@@ -37,6 +37,10 @@ Run the detector tests with `npm test`.
 
 The detector pauses while a roast is playing, so RoastCast never roasts its own voice. The last 30 seconds of speech go into the prompt as context.
 
+**Day 3:** the humor. The roast writer is built from a written humor guide ([humor/guide.md](humor/guide.md): voice, the six ingredients, the three levels, the hard rules) and 30 hand-written example roasts ([humor/moments.json](humor/moments.json): 5 for each of crash, scream, silence, lucky win, rage quit and panic, each with its own joke shapes). Every moment is classified into one of those types (or "general"), so a crash and a long silence get different kinds of jokes. For each moment the model writes **three candidates in one call**, anything over 15 words (or lifted from the examples) is dropped, and a quick **pick step** chooses the funniest. The server remembers the session's earlier moments and roasts, so callbacks ("third time in the ocean") can happen. The page shows all three takes and which one won.
+
+To tune the humor, edit the guide or the examples and run `npm run eval`, which prints every candidate and the pick for a spread of moments. Real quality is measured with friends' laugh scores (Day 5), which the page logs to `data/timing-log.jsonl` with the candidates.
+
 ## What success looks like
 
 - A stranger opens the link, plays for two minutes, and laughs out loud at least once.

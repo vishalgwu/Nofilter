@@ -1,0 +1,103 @@
+{
+  "types": {
+    "crash": {
+      "label": "a crash",
+      "shapes": [
+        "Blame the object: the wall, the ocean or the pigeon is now the main character.",
+        "Compare the driving or the landing to a toddler, a raccoon or a shopping cart.",
+        "Treat the crash as a deliberate plan, a career move or an official ceremony."
+      ],
+      "examples": [
+        { "moment": "Drove into the ocean for the third time", "level": "gentle", "roast": "Third time in the ocean. Is the car a boat now?" },
+        { "moment": "Crashed into a wall right at the start", "level": "gentle", "roast": "Bold strategy, introducing the wall to the car personally." },
+        { "moment": "Braked for a pigeon and hit a bus", "level": "spicy", "roast": "You braked for a pigeon and hit a bus." },
+        { "moment": "Scraped the car while parking", "level": "spicy", "roast": "Parking like a raccoon with a license." },
+        { "moment": "Drove off a cliff on the easy level", "level": "savage", "roast": "That wasn't a crash, that was a farewell tour for the car." }
+      ]
+    },
+    "scream": {
+      "label": "a scream",
+      "shapes": [
+        "Exaggerate the volume: windows, wine glasses, neighbors, dogs, the moon.",
+        "Make the thing they screamed at far too small, or far too fictional, to deserve it.",
+        "Report the scream like official news: a complaint filed, a record broken, a ghost concerned."
+      ],
+      "examples": [
+        { "moment": "Screamed at a jump scare", "level": "gentle", "roast": "Even the ghost asked if you were okay." },
+        { "moment": "Screamed when a spider appeared in the game", "level": "gentle", "roast": "Brave warrior, defeated by eight pixelated legs." },
+        { "moment": "Screamed at a jump scare and threw the controller", "level": "spicy", "roast": "The ghost filed a noise complaint, and the controller filed for divorce." },
+        { "moment": "Screamed at a tiny enemy", "level": "spicy", "roast": "Somewhere, a dog just moved out because of that scream." },
+        { "moment": "Screamed for ten seconds straight", "level": "savage", "roast": "That scream shattered windows, wine glasses, and whatever dignity was left." }
+      ]
+    },
+    "silence": {
+      "label": "a long silence",
+      "shapes": [
+        "Treat the silence as a dramatic event: a plan, a prayer, a software update, a staring contest.",
+        "Suggest the brain is buffering, loading, rebooting or has left the building.",
+        "Be gently concerned, as if checking whether the player is still alive in there."
+      ],
+      "examples": [
+        { "moment": "Stared at the same door for a minute", "level": "gentle", "roast": "Take your time. The door isn't going anywhere either." },
+        { "moment": "Quiet for twenty seconds", "level": "gentle", "roast": "Thinking, or just buffering? Either way, I'm proud of you." },
+        { "moment": "Thirty seconds of silence during a boss fight", "level": "spicy", "roast": "Thirty seconds of silence. Was that strategy, or a software update?" },
+        { "moment": "Went quiet right after dying", "level": "spicy", "roast": "Dying in silence. Truly the sound of someone who is totally fine." },
+        { "moment": "Total silence for a full minute", "level": "savage", "roast": "A full minute of silence. Even the loading screen felt judged." }
+      ]
+    },
+    "lucky_win": {
+      "label": "a lucky win",
+      "shapes": [
+        "Backhanded praise: the win was an accident that the player now explains like a masterplan.",
+        "Give the credit to luck, the universe, the enemy's pity or a confused game engine.",
+        "Mock the confident victory speech that follows a win nobody understands."
+      ],
+      "examples": [
+        { "moment": "Won with one health left", "level": "gentle", "roast": "One health left and a trophy. The universe loves you." },
+        { "moment": "Won the match by accident", "level": "gentle", "roast": "Skill? No. Destiny? Maybe. Either way, nicely done." },
+        { "moment": "Won the match with zero idea how", "level": "spicy", "roast": "Won by accident, then explained it like a strategy." },
+        { "moment": "A lucky clutch win", "level": "spicy", "roast": "Pure luck, delivered with the confidence of a genius." },
+        { "moment": "Won while hiding in a corner", "level": "savage", "roast": "Victory by hiding. The enemy team died of boredom, not skill." }
+      ]
+    },
+    "rage_quit": {
+      "label": "a rage quit",
+      "shapes": [
+        "Mock the dramatic exit: the slammed controller, the uninstall, the final speech.",
+        "Make the game or the boss the winner who did not even have to try.",
+        "Treat the quit as a tiny retirement ceremony, with a comeback already scheduled."
+      ],
+      "examples": [
+        { "moment": "Quit right before the final boss", "level": "gentle", "roast": "Quit right before the final boss. The boss sends thanks." },
+        { "moment": "Rage quit after one death", "level": "gentle", "roast": "One death, one quit. Efficient, honestly." },
+        { "moment": "Threw the controller and quit", "level": "spicy", "roast": "Controller thrown, game closed. The boss didn't even have to try." },
+        { "moment": "Rage quit and uninstalled the game", "level": "spicy", "roast": "Uninstalled the game? It said the same about your reflexes." },
+        { "moment": "Rage quit after losing to the tutorial boss", "level": "savage", "roast": "Lost to the tutorial boss and blamed the tutorial. Iconic." }
+      ]
+    },
+    "panic": {
+      "label": "a panic",
+      "shapes": [
+        "Describe the frantic behavior like nature footage: headless chicken, slot machine, squirrel in traffic.",
+        "Contrast the panic with how calm the player claimed to be a moment ago.",
+        "Credit the panic as a strategy, a dance or a speedrun of bad decisions."
+      ],
+      "examples": [
+        { "moment": "Panicked and healed the enemy team", "level": "gentle", "roast": "Healing the enemy team. Generous, but maybe not today." },
+        { "moment": "Pressed every button at once", "level": "gentle", "roast": "Pressing every button is technically a strategy." },
+        { "moment": "Panicked and ran in circles", "level": "spicy", "roast": "Running in circles: the official dance of pure panic." },
+        { "moment": "Panicked and shot a teammate", "level": "spicy", "roast": "Calm under pressure. Unfortunately the pressure was your own teammate." },
+        { "moment": "Panic-fled from a rabbit", "level": "savage", "roast": "Fleeing from a rabbit. The bunny has never felt so powerful." }
+      ]
+    },
+    "general": {
+      "label": "something that just happened",
+      "shapes": [
+        "Find the single funniest specific detail in what was said and exaggerate that.",
+        "Answer the player's own words back at them with one extra twist.",
+        "Treat a small thing as a huge official event."
+      ],
+      "examples": []
+    }
+  }
+}

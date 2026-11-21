@@ -7,12 +7,12 @@ import { MomentDetector } from './detector.js';
 const $ = (id) => document.getElementById(id);
 
 const MOMENTS = [
-  { label: 'Crash', c: '#ff8a1f', text: 'I drove straight into the ocean for the third time.' },
-  { label: 'Scream', c: '#ff3d81', text: 'I screamed at a jump scare and threw my controller.' },
-  { label: 'Silence', c: '#7b8cff', text: 'I stared at the same door for a full minute without moving.' },
-  { label: 'Lucky win', c: '#3ddc97', text: 'I won the match with one health and zero idea how.' },
-  { label: 'Rage quit', c: '#ff5c6c', text: 'I rage quit right before the final boss.' },
-  { label: 'Panic', c: '#ffb347', text: 'I panicked and healed the enemy team.' },
+  { label: 'Crash', type: 'crash', c: '#ff8a1f', text: 'I drove straight into the ocean for the third time.' },
+  { label: 'Scream', type: 'scream', c: '#ff3d81', text: 'I screamed at a jump scare and threw my controller.' },
+  { label: 'Silence', type: 'silence', c: '#7b8cff', text: 'I stared at the same door for a full minute without moving.' },
+  { label: 'Lucky win', type: 'lucky_win', c: '#3ddc97', text: 'I won the match with one health and zero idea how.' },
+  { label: 'Rage quit', type: 'rage_quit', c: '#ff5c6c', text: 'I rage quit right before the final boss.' },
+  { label: 'Panic', type: 'panic', c: '#ffb347', text: 'I panicked and healed the enemy team.' },
 ];
 const LEVEL_HINTS = {
   gentle: 'Friendly teasing, like a proud friend watching you struggle.',
@@ -35,8 +35,16 @@ const el = {
   autoToggle: $('autoToggle'), cooldownTag: $('cooldownTag'), captions: $('captions'), trigger: $('trigger'),
 };
 
-const state = { level: 'spicy', busy: false, current: null, history: [], toastTimer: 0, transcript: [] };
-const MOMENT_LABEL = { scream: 'Scream', crash: 'Crash', silence: 'Long silence', speech: 'Speech', typed: 'Typed' };
+const state = {
+  level: 'spicy', busy: false, current: null, history: [], toastTimer: 0, transcript: [],
+  chipType: null, // the moment type of the quick-pick chip, until the text is edited
+  // One id per page load: the server uses it to remember running jokes for this session.
+  sessionId: (crypto.randomUUID && crypto.randomUUID()) || String(Math.random()).slice(2) + Date.now(),
+};
+const MOMENT_LABEL = {
+  scream: 'Scream', crash: 'Crash', silence: 'Long silence', speech: 'Speech', typed: 'Typed',
+  lucky_win: 'Lucky win', rage_quit: 'Rage quit', panic: 'Panic',
+};
 
 // The detector decides when a moment is worth a roast (see detector.js).
 const detector = new MomentDetector({
@@ -110,6 +118,7 @@ MOMENTS.forEach((m) => {
   b.addEventListener('click', () => {
     el.moment.value = m.text;
     updateCount();
+    state.chipType = m.type;
     el.chips.querySelectorAll('.chip').forEach((c) => c.setAttribute('aria-pressed', String(c === b)));
     el.moment.focus();
   });
@@ -126,6 +135,7 @@ function autosize() {
 }
 el.moment.addEventListener('input', () => {
   updateCount();
+  state.chipType = null;
   el.chips.querySelectorAll('.chip').forEach((c) => c.setAttribute('aria-pressed', 'false'));
 });
 el.moment.addEventListener('keydown', (e) => {
@@ -189,7 +199,7 @@ async function roast(auto = null) {
   const typed = !auto;
   const moment = typed ? el.moment.value.trim() : auto.text || '';
   if (typed && moment.length < 3) { toast('Tell me what just happened first.'); el.moment.focus(); return; }
-  const momentType = typed ? 'typed' : auto.type;
+  const momentType = typed ? state.chipType || 'typed' : auto.type;
   const shownMoment = typed ? moment : auto.type === 'speech' ? moment
     : auto.type === 'silence' ? `Silent for ${auto.seconds}s` : MOMENT_LABEL[auto.type];
   const transcript = typed ? '' : recentTranscript();
@@ -210,10 +220,11 @@ async function roast(auto = null) {
   const t0 = performance.now();
   try {
     const r = await post('/api/roast', {
-      moment, momentType, transcript, seconds: auto?.seconds, level: state.level,
+      moment, momentType, transcript, seconds: auto?.seconds, level: state.level, sessionId: state.sessionId,
     });
     renderRoast(r.roast);
-    setStat(el.statWrite, el.vWrite, r.llmMs, grade(r.llmMs, 700, 1500));
+    renderTakes(r);
+    setStat(el.statWrite, el.vWrite, r.llmMs, grade(r.llmMs, 1000, 2000));
     el.replayBtn.disabled = false;
     el.copyBtn.disabled = false;
     state.current = { id: r.id, text: r.roast, level: r.level, moment: shownMoment, momentType, llmMs: r.llmMs };
@@ -228,7 +239,8 @@ async function roast(auto = null) {
       el.rate.classList.remove('is-done');
       el.rate.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', 'false'));
       addHistory(state.current);
-      log({ type: 'roast', id: r.id, level: r.level, momentType, moment: shownMoment, roast: r.roast,
+      log({ type: 'roast', id: r.id, level: r.level, momentType, momentKind: r.type, moment: shownMoment, roast: r.roast,
+        candidates: r.candidates, picked: r.picked, pickedBy: r.pickedBy, candMs: r.candMs, pickMs: r.pickMs,
         llmMs: r.llmMs, voiceMs: Math.round(t.voiceMs), firstSoundMs: Math.round(t.firstSoundMs) });
     }
   } catch (err) {
@@ -242,6 +254,30 @@ async function roast(auto = null) {
   }
 }
 el.roastBtn.addEventListener('click', () => roast());
+
+// "Other takes": every candidate the writer produced, and which one the pick step chose.
+function renderTakes(r) {
+  const list = $('takesList');
+  list.innerHTML = '';
+  r.candidates.forEach((c, i) => {
+    const li = document.createElement('li');
+    if (i === r.picked) li.className = 'picked';
+    const t = document.createElement('span');
+    t.textContent = c;
+    li.appendChild(t);
+    if (i === r.picked) {
+      const tag = document.createElement('em');
+      tag.textContent = r.candidates.length > 1 ? (r.pickedBy === 'ai' ? 'picked' : 'shortest') : 'only take';
+      li.appendChild(tag);
+    }
+    list.appendChild(li);
+  });
+  const n = r.candidates.length;
+  $('takesSummary').textContent =
+    `${n} take${n === 1 ? '' : 's'} · ${r.pickMs ? `write ${fmt(r.candMs)} + pick ${fmt(r.pickMs)}` : `write ${fmt(r.candMs)}`}`;
+  $('takes').hidden = false;
+  $('takes').open = false;
+}
 
 function showTrigger(t) {
   el.trigger.innerHTML = '';

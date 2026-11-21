@@ -9,6 +9,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
+import { writeRoast } from './roaster.js';
+import { ACCEPTED_TYPES, LEVELS, SessionStore, countWords } from './humor.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CLIENT_DIR = path.join(ROOT, 'client');
@@ -20,23 +22,6 @@ const OPENAI_KEY = process.env.OPENAI_API_KEY || '';
 const ELEVEN_KEY = process.env.ELEVENLABS_API_KEY || '';
 const DEEPGRAM_KEY = process.env.DEEPGRAM_API_KEY || '';
 const LLM_MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini'; // fast, non-reasoning
-const MAX_WORDS = 15;
-const LEVELS = {
-  gentle: 'GENTLE: friendly teasing, like a proud friend watching you struggle. Warm, light, affectionate.',
-  spicy: 'SPICY: sharper punchlines and more exaggeration, still playful.',
-  savage: 'SAVAGE: big, theatrical, over the top. Aimed at the gameplay only.',
-};
-
-const SYSTEM_PROMPT = `You are RoastCast, a live comedy roaster for gamers and streamers.
-A moment just happened. Reply with exactly ONE roast of it.
-
-Rules:
-- ${MAX_WORDS} words maximum. Shorter is funnier.
-- Be specific: mention the exact thing that happened, never a generic insult.
-- Exaggerate the real moment one step too far. Use a surprise at the end when you can.
-- Tease the play, never the person. Never mention race, gender, religion, sexuality, disability, appearance, family or anything personal.
-- No profanity, no hashtags, no emojis, no quotation marks.
-- Output only the roast text.`;
 
 // ---------- small helpers ----------
 const MIME = {
@@ -49,7 +34,6 @@ const MIME = {
   '.json': 'application/json; charset=utf-8',
 };
 
-const countWords = (s) => s.trim().split(/\s+/).filter(Boolean).length;
 const json = (res, status, body) => {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(body));
@@ -72,78 +56,13 @@ async function readBody(req, limit = 8 * 1024) {
   }
 }
 
-function cleanRoast(text) {
-  return text
-    .replace(/^["'“”‘’\s]+|["'“”‘’\s]+$/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-// Hard cap in code, not only in the prompt. Cut at 15 words and end cleanly.
-function capWords(text) {
-  const words = text.split(/\s+/);
-  if (words.length <= MAX_WORDS) return text;
-  return words.slice(0, MAX_WORDS).join(' ').replace(/[,;:\-—]+$/, '') + '.';
-}
+const sessions = new SessionStore(); // per-browser-session memory for running jokes
 
 // Remember the last roasts so /api/speak only ever voices text this server wrote.
 const roastStore = new Map();
 function remember(id, entry) {
   roastStore.set(id, entry);
   if (roastStore.size > 200) roastStore.delete(roastStore.keys().next().value);
-}
-
-// ---------- what happened -> prompt text ----------
-const AUTO_TYPES = new Set(['scream', 'crash', 'silence', 'speech']);
-
-function describeMoment({ momentType, moment, seconds }) {
-  switch (momentType) {
-    case 'scream': return 'The player just let out a loud scream or shout.';
-    case 'crash': return 'A sudden loud crash or bang just happened.';
-    case 'silence': return `The player has gone completely silent for ${seconds || 8} seconds.`;
-    case 'speech': return `The player just said: "${moment}"`;
-    default: return moment;
-  }
-}
-
-// ---------- roast writer (OpenAI) ----------
-async function askLLM(ctx, level, strict) {
-  const heard = ctx.transcript
-    ? `\nWhat was heard in the last 30 seconds (oldest first): "${ctx.transcript}"`
-    : '';
-  const userMsg =
-    `Roast level: ${LEVELS[level]}\nMoment: ${describeMoment(ctx)}${heard}` +
-    (strict ? `\nYour last answer was too long. Use fewer than 12 words.` : '');
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: LLM_MODEL,
-      temperature: 1,
-      max_completion_tokens: 60,
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: userMsg },
-      ],
-    }),
-  });
-  if (!res.ok) {
-    const detail = await res.text();
-    console.error('OpenAI error', res.status, detail.slice(0, 300));
-    throw Object.assign(new Error(`The roast writer failed (OpenAI ${res.status}).`), { status: 502 });
-  }
-  const data = await res.json();
-  return cleanRoast(data.choices?.[0]?.message?.content || '');
-}
-
-async function writeRoast(ctx, level) {
-  let text = await askLLM(ctx, level, false);
-  if (!text) throw Object.assign(new Error('The roast writer returned nothing.'), { status: 502 });
-  if (countWords(text) > MAX_WORDS) {
-    const retry = await askLLM(ctx, level, true);
-    if (retry) text = retry;
-  }
-  return capWords(text);
 }
 
 // ---------- voice (ElevenLabs primary, OpenAI fallback) ----------
@@ -238,26 +157,31 @@ async function handleRoast(req, res) {
   const clean = (v, n) => String(v || '').replace(/\s+/g, ' ').trim().slice(0, n);
   const moment = clean(body.moment, 200);
   const transcript = clean(body.transcript, 700);
-  const momentType = AUTO_TYPES.has(body.momentType) ? body.momentType : 'typed';
+  const momentType = ACCEPTED_TYPES.has(body.momentType) ? body.momentType : 'typed';
   const seconds = Math.min(600, Math.max(1, Number(body.seconds) || 8));
   const level = Object.hasOwn(LEVELS, body.level) ? body.level : 'spicy';
-  const needsText = momentType === 'typed' || momentType === 'speech';
-  if (needsText && moment.length < 3) return json(res, 400, { error: 'Tell me what just happened first.' });
+  const audioOnly = ['scream', 'crash', 'silence'].includes(momentType); // detected from sound, no words needed
+  if (!audioOnly && moment.length < 3) return json(res, 400, { error: 'Tell me what just happened first.' });
 
   const ctx = { momentType, moment, transcript, seconds };
-  const t0 = performance.now();
-  const text = await writeRoast(ctx, level);
-  const llmMs = Math.round(performance.now() - t0);
+  const session = sessions.get(body.sessionId); // running jokes live here
+  const r = await writeRoast(ctx, level, session);
   const id = randomUUID();
-  remember(id, { text, moment, level });
-  json(res, 200, { id, roast: text, level, momentType, words: countWords(text), llmMs, model: LLM_MODEL });
+  remember(id, { text: r.text, moment, level });
+  json(res, 200, {
+    id, roast: r.text, level, momentType, type: r.type, words: countWords(r.text),
+    candidates: r.candidates, picked: r.picked, pickedBy: r.pickedBy,
+    candMs: r.candMs, pickMs: r.pickMs, llmMs: r.llmMs, model: LLM_MODEL,
+  });
 }
 
 async function handleLog(req, res) {
   const body = await readBody(req);
-  const allowed = ['id', 'type', 'level', 'momentType', 'moment', 'roast', 'llmMs', 'voiceMs', 'firstSoundMs', 'laughScore'];
+  const allowed = ['id', 'type', 'level', 'momentType', 'momentKind', 'moment', 'roast', 'picked', 'pickedBy',
+    'candMs', 'pickMs', 'llmMs', 'voiceMs', 'firstSoundMs', 'laughScore'];
   const row = { ts: new Date().toISOString() };
   for (const k of allowed) if (body[k] !== undefined) row[k] = body[k];
+  if (Array.isArray(body.candidates)) row.candidates = body.candidates.slice(0, 5).map((c) => String(c).slice(0, 120));
   await mkdir(path.dirname(LOG_FILE), { recursive: true });
   await appendFile(LOG_FILE, JSON.stringify(row) + '\n');
   json(res, 200, { ok: true });
