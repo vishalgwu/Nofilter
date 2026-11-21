@@ -2,6 +2,8 @@
 // typed moment -> /api/roast (OpenAI) -> /api/speak (streamed voice) -> played here.
 // Also: mic permission + live input-level meter (ready for Day 2).
 
+import { MomentDetector } from './detector.js';
+
 const $ = (id) => document.getElementById(id);
 
 const MOMENTS = [
@@ -30,9 +32,25 @@ const el = {
   rate: $('rate'), replayBtn: $('replayBtn'), copyBtn: $('copyBtn'),
   historyWrap: $('historyWrap'), hist: $('hist'), histCount: $('histCount'),
   status: $('status'), statusText: $('statusText'), toast: $('toast'), kbdHint: $('kbdHint'),
+  autoToggle: $('autoToggle'), cooldownTag: $('cooldownTag'), captions: $('captions'), trigger: $('trigger'),
 };
 
-const state = { level: 'spicy', busy: false, current: null, history: [], toastTimer: 0 };
+const state = { level: 'spicy', busy: false, current: null, history: [], toastTimer: 0, transcript: [] };
+const MOMENT_LABEL = { scream: 'Scream', crash: 'Crash', silence: 'Long silence', speech: 'Speech', typed: 'Typed' };
+
+// The detector decides when a moment is worth a roast (see detector.js).
+const detector = new MomentDetector({
+  onMoment: (m) => { if (el.autoToggle.checked) roast(m); },
+});
+const armDetector = () => detector.setEnabled(el.autoToggle.checked && !!mic.stream, performance.now());
+el.autoToggle.addEventListener('change', armDetector);
+
+// What the player said in the last 30 seconds (final words only).
+function recentTranscript() {
+  const cutoff = performance.now() - 30000;
+  state.transcript = state.transcript.filter((x) => x.t >= cutoff);
+  return state.transcript.map((x) => x.text).join(' ').slice(-600);
+}
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 el.kbdHint.innerHTML = (isMac ? '&#8984;' : 'Ctrl') + '&nbsp;&#8629;';
 
@@ -139,8 +157,15 @@ function renderRoast(text) {
   el.roast.appendChild(p);
 }
 
-function playRoast(id, t0, { first = true } = {}) {
+// After the roast ends, wait a beat (so the speaker tail is not heard) and listen again.
+function afterSpeak() {
+  setStage('idle', 'Idle');
+  setTimeout(() => { if (!state.busy && audio.paused) armDetector(); }, 1000);
+}
+
+function playRoast(id, t0) {
   ensureAudioContext();
+  detector.setEnabled(false, performance.now()); // never roast our own voice
   return new Promise((resolve) => {
     const tStart = performance.now();
     let done = false;
@@ -150,19 +175,28 @@ function playRoast(id, t0, { first = true } = {}) {
       setStage('speaking', 'Speaking');
       finish({ voiceMs: now - tStart, firstSoundMs: now - t0 });
     };
-    audio.onended = () => setStage('idle', 'Idle');
-    audio.onerror = () => { setStage('idle', 'Idle'); toast('The voice could not play. Check the server log.'); finish(null); };
+    audio.onended = afterSpeak;
+    audio.onerror = () => { afterSpeak(); toast('The voice could not play. Check the server log.'); finish(null); };
     audio.src = `/api/speak?id=${encodeURIComponent(id)}&_=${Date.now()}`;
-    audio.play().catch((err) => { setStage('idle', 'Idle'); toast('Audio was blocked: ' + err.message); finish(null); });
+    audio.play().catch((err) => { afterSpeak(); toast('Audio was blocked: ' + err.message); finish(null); });
   });
 }
 
-async function roast() {
+// roast()        -> roast the typed moment (button / Ctrl+Enter)
+// roast(moment)  -> roast a moment the detector heard: { type, text?, seconds? }
+async function roast(auto = null) {
   if (state.busy) return;
-  const moment = el.moment.value.trim();
-  if (moment.length < 3) { toast('Tell me what just happened first.'); el.moment.focus(); return; }
+  const typed = !auto;
+  const moment = typed ? el.moment.value.trim() : auto.text || '';
+  if (typed && moment.length < 3) { toast('Tell me what just happened first.'); el.moment.focus(); return; }
+  const momentType = typed ? 'typed' : auto.type;
+  const shownMoment = typed ? moment : auto.type === 'speech' ? moment
+    : auto.type === 'silence' ? `Silent for ${auto.seconds}s` : MOMENT_LABEL[auto.type];
+  const transcript = typed ? '' : recentTranscript();
 
   state.busy = true;
+  detector.setEnabled(false, performance.now());
+  showTrigger(typed ? null : { type: momentType, text: moment, seconds: auto.seconds });
   el.roastBtn.disabled = true;
   el.roastBtn.classList.add('is-loading');
   el.roastBtn.querySelector('.btn-label').textContent = 'Writing';
@@ -175,12 +209,14 @@ async function roast() {
 
   const t0 = performance.now();
   try {
-    const r = await post('/api/roast', { moment, level: state.level });
+    const r = await post('/api/roast', {
+      moment, momentType, transcript, seconds: auto?.seconds, level: state.level,
+    });
     renderRoast(r.roast);
     setStat(el.statWrite, el.vWrite, r.llmMs, grade(r.llmMs, 700, 1500));
     el.replayBtn.disabled = false;
     el.copyBtn.disabled = false;
-    state.current = { id: r.id, text: r.roast, level: r.level, moment, llmMs: r.llmMs };
+    state.current = { id: r.id, text: r.roast, level: r.level, moment: shownMoment, momentType, llmMs: r.llmMs };
 
     const t = await playRoast(r.id, t0);
     if (t) {
@@ -192,11 +228,11 @@ async function roast() {
       el.rate.classList.remove('is-done');
       el.rate.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', 'false'));
       addHistory(state.current);
-      log({ type: 'roast', id: r.id, level: r.level, moment, roast: r.roast,
+      log({ type: 'roast', id: r.id, level: r.level, momentType, moment: shownMoment, roast: r.roast,
         llmMs: r.llmMs, voiceMs: Math.round(t.voiceMs), firstSoundMs: Math.round(t.firstSoundMs) });
     }
   } catch (err) {
-    setStage('idle', 'Idle');
+    afterSpeak();
     toast(err.message);
   } finally {
     state.busy = false;
@@ -205,13 +241,33 @@ async function roast() {
     el.roastBtn.querySelector('.btn-label').textContent = 'Roast me';
   }
 }
-el.roastBtn.addEventListener('click', roast);
+el.roastBtn.addEventListener('click', () => roast());
+
+function showTrigger(t) {
+  el.trigger.innerHTML = '';
+  if (!t) { el.trigger.hidden = true; return; }
+  const tag = document.createElement('span');
+  tag.className = 'tag';
+  tag.textContent = MOMENT_LABEL[t.type] || t.type;
+  el.trigger.appendChild(tag);
+  const note = document.createElement('span');
+  if (t.type === 'speech') {
+    note.append('you said ');
+    const q = document.createElement('q');
+    q.textContent = t.text.length > 90 ? t.text.slice(0, 90) + '...' : t.text;
+    note.appendChild(q);
+  } else {
+    note.textContent = t.type === 'silence' ? `detected after ${t.seconds}s of quiet` : 'detected from the audio';
+  }
+  el.trigger.appendChild(note);
+  el.trigger.hidden = false;
+}
 
 el.replayBtn.addEventListener('click', async () => {
   if (!state.current) return;
   renderRoast(state.current.text);
   setStage('writing', 'Loading voice');
-  await playRoast(state.current.id, performance.now(), { first: false });
+  await playRoast(state.current.id, performance.now());
 });
 el.copyBtn.addEventListener('click', async () => {
   if (!state.current) return;
@@ -247,61 +303,172 @@ function addHistory(item) {
   btn.addEventListener('click', () => {
     state.current = item;
     renderRoast(item.text);
-    playRoast(item.id, performance.now(), { first: false });
+    playRoast(item.id, performance.now());
   });
   li.append(left, btn);
   el.hist.prepend(li);
 }
 
-// ---------- microphone + level meter ----------
+// ---------- microphone, live transcription, level meter ----------
+// mic -> AudioWorklet (16 kHz PCM, 100 ms chunks + loudness) -> WebSocket -> server -> Deepgram
+// The loudness of every chunk feeds the moment detector; the words come back as captions.
 const BARS = 28;
 const bars = [];
 for (let i = 0; i < BARS; i++) { const s = document.createElement('span'); el.meter.appendChild(s); bars.push(s); }
-const mic = { stream: null, source: null, analyser: null, raf: 0, data: null };
+const mic = { stream: null, source: null, node: null, mute: null, ws: null, ready: false, level: 0 };
+let workletLoaded = false;
+
+const setMicStatus = (t) => { el.micStatus.textContent = t; };
+
+function drawMeter(rms) {
+  const level = Math.min(1, rms * 5.5);
+  const on = Math.round(level * BARS);
+  for (let i = 0; i < BARS; i++) {
+    const b = bars[i];
+    const active = i < on;
+    b.className = active ? (i > BARS * 0.85 ? 'peak' : i > BARS * 0.62 ? 'hot' : 'on') : '';
+    b.style.transform = `scaleY(${active ? 0.35 + 0.65 * Math.min(1, (i + 1) / BARS + level * 0.4) : 0.12})`;
+  }
+}
+
+// ----- captions -----
+const caps = { lines: [], partial: '' };
+function renderCaptions() {
+  el.captions.innerHTML = '';
+  if (!caps.lines.length && !caps.partial) {
+    const s = document.createElement('span');
+    s.className = 'cap-empty';
+    s.textContent = mic.stream ? 'Listening... say something, or make some noise.' : 'Live words appear here once you start listening.';
+    el.captions.appendChild(s);
+    return;
+  }
+  caps.lines.slice(-3).forEach((t, i, arr) => {
+    const p = document.createElement('p');
+    if (i < arr.length - 1 || caps.partial) p.className = 'old';
+    p.textContent = t;
+    el.captions.appendChild(p);
+  });
+  if (caps.partial) {
+    const p = document.createElement('p');
+    p.className = 'partial';
+    p.textContent = caps.partial;
+    el.captions.appendChild(p);
+  }
+}
+
+function onTranscript(m) {
+  if (!detector.enabled) return; // ignore words heard while the roast plays
+  const now = performance.now();
+  if (m.text) {
+    if (m.final) {
+      caps.lines.push(m.text);
+      caps.partial = '';
+      state.transcript.push({ t: now, text: m.text });
+    } else {
+      caps.partial = m.text;
+    }
+    renderCaptions();
+  }
+  detector.speech(m.text, { final: m.final, speechFinal: m.speechFinal }, now);
+}
+
+// ----- socket to the server -----
+function openSocket() {
+  const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+  ws.binaryType = 'arraybuffer';
+  mic.ws = ws;
+  mic.ready = false;
+  setMicStatus('Connecting');
+  ws.onmessage = (e) => {
+    let m;
+    try { m = JSON.parse(e.data); } catch { return; }
+    if (m.type === 'ready') { mic.ready = true; setMicStatus('Listening'); }
+    else if (m.type === 'transcript') onTranscript(m);
+    else if (m.type === 'utterance_end') { if (detector.enabled) detector.flushUtterance(performance.now()); }
+    else if (m.type === 'error') { toast(m.message); setMicStatus('Transcription offline'); }
+  };
+  ws.onclose = () => {
+    if (mic.stream && mic.ws === ws) { mic.ready = false; setMicStatus('Transcription offline'); toast('Live transcription disconnected. Stop and start listening again.'); }
+  };
+}
+
+// ----- one 100 ms audio chunk -----
+let lastCool = '';
+function onFrame({ pcm, rms, peak }) {
+  const now = performance.now();
+  drawMeter(rms);
+  if (mic.ws && mic.ws.readyState === WebSocket.OPEN && mic.ws.bufferedAmount < 256 * 1024) mic.ws.send(pcm);
+  detector.feed(rms, peak, now);
+  const left = Math.ceil(detector.cooldownLeft(now) / 1000);
+  const txt = !detector.enabled ? 'paused' : left > 0 ? `next roast in ${left}s` : 'ready';
+  if (txt !== lastCool) {
+    lastCool = txt;
+    el.cooldownTag.textContent = txt;
+    el.cooldownTag.classList.toggle('wait', left > 0);
+  }
+}
 
 async function startMic() {
+  if (mic.stream) return;
+  el.micBtn.disabled = true;
+  let stream;
   try {
-    mic.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 },
+    });
   } catch (err) {
+    el.micBtn.disabled = false;
     toast(err.name === 'NotAllowedError' ? 'Microphone blocked. Allow it in the address bar and try again.' : 'No microphone found.');
     return;
   }
-  ensureAudioContext();
-  mic.source = ctx.createMediaStreamSource(mic.stream);
-  mic.analyser = ctx.createAnalyser();
-  mic.analyser.fftSize = 512;
-  mic.analyser.smoothingTimeConstant = 0.6;
-  mic.data = new Uint8Array(mic.analyser.fftSize);
-  mic.source.connect(mic.analyser); // not connected to speakers
+  try {
+    ensureAudioContext();
+    if (!workletLoaded) { await ctx.audioWorklet.addModule('worklet.js'); workletLoaded = true; }
+  } catch (err) {
+    stream.getTracks().forEach((t) => t.stop());
+    el.micBtn.disabled = false;
+    toast('Could not start audio capture: ' + err.message);
+    return;
+  }
+  mic.stream = stream;
+  mic.source = ctx.createMediaStreamSource(stream);
+  mic.node = new AudioWorkletNode(ctx, 'pcm-capture');
+  mic.mute = ctx.createGain(); // keeps the worklet running without playing the mic out loud
+  mic.mute.gain.value = 0;
+  mic.source.connect(mic.node);
+  mic.node.connect(mic.mute);
+  mic.mute.connect(ctx.destination);
+  mic.node.port.onmessage = (e) => onFrame(e.data);
+
+  state.transcript = [];
+  caps.lines = []; caps.partial = '';
+  detector.reset(performance.now());
+  armDetector();
+  openSocket();
+  renderCaptions();
+  el.micBtn.disabled = false;
   el.micBtn.setAttribute('aria-pressed', 'true');
   el.micLabel.textContent = 'Stop listening';
   el.meterWrap.dataset.on = 'true';
-  el.micStatus.textContent = 'Listening';
-  const tick = () => {
-    mic.analyser.getByteTimeDomainData(mic.data);
-    let sum = 0;
-    for (let i = 0; i < mic.data.length; i++) { const v = (mic.data[i] - 128) / 128; sum += v * v; }
-    const rms = Math.sqrt(sum / mic.data.length);
-    const level = Math.min(1, rms * 5.5);
-    const on = Math.round(level * BARS);
-    bars.forEach((b, i) => {
-      const active = i < on;
-      b.className = active ? (i > BARS * 0.85 ? 'peak' : i > BARS * 0.62 ? 'hot' : 'on') : '';
-      b.style.transform = `scaleY(${active ? 0.35 + 0.65 * Math.min(1, (i + 1) / BARS + level * 0.4) : 0.12})`;
-    });
-    mic.raf = requestAnimationFrame(tick);
-  };
-  tick();
 }
+
 function stopMic() {
-  cancelAnimationFrame(mic.raf);
+  mic.node && (mic.node.port.onmessage = null);
   mic.stream?.getTracks().forEach((t) => t.stop());
-  mic.source?.disconnect();
-  mic.stream = mic.source = mic.analyser = null;
+  mic.source?.disconnect(); mic.node?.disconnect(); mic.mute?.disconnect();
+  const ws = mic.ws;
+  mic.stream = mic.source = mic.node = mic.mute = mic.ws = null;
+  mic.ready = false;
+  ws && ws.close();
+  armDetector(); // disables, since the mic is off
   el.micBtn.setAttribute('aria-pressed', 'false');
   el.micLabel.textContent = 'Start listening';
   el.meterWrap.dataset.on = 'false';
-  el.micStatus.textContent = 'Mic off';
+  setMicStatus('Mic off');
+  el.cooldownTag.textContent = '';
+  lastCool = '';
+  caps.lines = []; caps.partial = '';
+  renderCaptions();
   bars.forEach((b) => { b.className = ''; b.style.transform = ''; });
 }
 el.micBtn.addEventListener('click', () => (mic.stream ? stopMic() : startMic()));
@@ -379,6 +546,7 @@ async function checkHealth() {
   try {
     const h = await (await fetch('/api/health', { cache: 'no-store' })).json();
     if (!h.openai) { el.status.dataset.state = 'bad'; el.statusText.textContent = 'OPENAI_API_KEY missing'; }
+    else if (!h.deepgram) { el.status.dataset.state = 'warn'; el.statusText.textContent = 'DEEPGRAM_API_KEY missing'; }
     else if (!h.elevenlabs) { el.status.dataset.state = 'ok'; el.statusText.textContent = 'Ready (OpenAI voice)'; }
     else { el.status.dataset.state = 'ok'; el.statusText.textContent = 'Ready'; }
   } catch {

@@ -10,6 +10,10 @@
   },
   "scripts": {
     "start": "node --env-file=.env server/index.js",
-    "dev": "node --watch --env-file=.env server/index.js"
+    "dev": "node --watch --env-file=.env server/index.js",
+    "test": "node --test \"test/*.test.js\""
+  },
+  "dependencies": {
+    "ws": "^8.23.0"
   }
 }

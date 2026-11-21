@@ -224,3 +224,6 @@ __marimo__/
 
 # RoastCast runtime logs
 data/*.jsonl
+
+# Dependencies
+node_modules/

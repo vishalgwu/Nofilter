@@ -8,6 +8,7 @@ import { Readable } from 'node:stream';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { WebSocketServer, WebSocket } from 'ws';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CLIENT_DIR = path.join(ROOT, 'client');
@@ -17,6 +18,7 @@ const PORT = Number(process.env.PORT || 3000);
 const HOST = '127.0.0.1';
 const OPENAI_KEY = process.env.OPENAI_API_KEY || '';
 const ELEVEN_KEY = process.env.ELEVENLABS_API_KEY || '';
+const DEEPGRAM_KEY = process.env.DEEPGRAM_API_KEY || '';
 const LLM_MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini'; // fast, non-reasoning
 const MAX_WORDS = 15;
 const LEVELS = {
@@ -91,10 +93,26 @@ function remember(id, entry) {
   if (roastStore.size > 200) roastStore.delete(roastStore.keys().next().value);
 }
 
+// ---------- what happened -> prompt text ----------
+const AUTO_TYPES = new Set(['scream', 'crash', 'silence', 'speech']);
+
+function describeMoment({ momentType, moment, seconds }) {
+  switch (momentType) {
+    case 'scream': return 'The player just let out a loud scream or shout.';
+    case 'crash': return 'A sudden loud crash or bang just happened.';
+    case 'silence': return `The player has gone completely silent for ${seconds || 8} seconds.`;
+    case 'speech': return `The player just said: "${moment}"`;
+    default: return moment;
+  }
+}
+
 // ---------- roast writer (OpenAI) ----------
-async function askLLM(moment, level, strict) {
+async function askLLM(ctx, level, strict) {
+  const heard = ctx.transcript
+    ? `\nWhat was heard in the last 30 seconds (oldest first): "${ctx.transcript}"`
+    : '';
   const userMsg =
-    `Roast level: ${LEVELS[level]}\nMoment: ${moment}` +
+    `Roast level: ${LEVELS[level]}\nMoment: ${describeMoment(ctx)}${heard}` +
     (strict ? `\nYour last answer was too long. Use fewer than 12 words.` : '');
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -118,11 +136,11 @@ async function askLLM(moment, level, strict) {
   return cleanRoast(data.choices?.[0]?.message?.content || '');
 }
 
-async function writeRoast(moment, level) {
-  let text = await askLLM(moment, level, false);
+async function writeRoast(ctx, level) {
+  let text = await askLLM(ctx, level, false);
   if (!text) throw Object.assign(new Error('The roast writer returned nothing.'), { status: 502 });
   if (countWords(text) > MAX_WORDS) {
-    const retry = await askLLM(moment, level, true);
+    const retry = await askLLM(ctx, level, true);
     if (retry) text = retry;
   }
   return capWords(text);
@@ -217,21 +235,27 @@ async function handleSpeak(req, res, url) {
 async function handleRoast(req, res) {
   if (!OPENAI_KEY) return json(res, 500, { error: 'OPENAI_API_KEY is missing in .env' });
   const body = await readBody(req);
-  const moment = String(body.moment || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+  const clean = (v, n) => String(v || '').replace(/\s+/g, ' ').trim().slice(0, n);
+  const moment = clean(body.moment, 200);
+  const transcript = clean(body.transcript, 700);
+  const momentType = AUTO_TYPES.has(body.momentType) ? body.momentType : 'typed';
+  const seconds = Math.min(600, Math.max(1, Number(body.seconds) || 8));
   const level = Object.hasOwn(LEVELS, body.level) ? body.level : 'spicy';
-  if (moment.length < 3) return json(res, 400, { error: 'Tell me what just happened first.' });
+  const needsText = momentType === 'typed' || momentType === 'speech';
+  if (needsText && moment.length < 3) return json(res, 400, { error: 'Tell me what just happened first.' });
 
+  const ctx = { momentType, moment, transcript, seconds };
   const t0 = performance.now();
-  const text = await writeRoast(moment, level);
+  const text = await writeRoast(ctx, level);
   const llmMs = Math.round(performance.now() - t0);
   const id = randomUUID();
   remember(id, { text, moment, level });
-  json(res, 200, { id, roast: text, level, words: countWords(text), llmMs, model: LLM_MODEL });
+  json(res, 200, { id, roast: text, level, momentType, words: countWords(text), llmMs, model: LLM_MODEL });
 }
 
 async function handleLog(req, res) {
   const body = await readBody(req);
-  const allowed = ['id', 'type', 'level', 'moment', 'roast', 'llmMs', 'voiceMs', 'firstSoundMs', 'laughScore'];
+  const allowed = ['id', 'type', 'level', 'momentType', 'moment', 'roast', 'llmMs', 'voiceMs', 'firstSoundMs', 'laughScore'];
   const row = { ts: new Date().toISOString() };
   for (const k of allowed) if (body[k] !== undefined) row[k] = body[k];
   await mkdir(path.dirname(LOG_FILE), { recursive: true });
@@ -259,7 +283,9 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   try {
     if (req.method === 'GET' && url.pathname === '/api/health') {
-      return json(res, 200, { ok: true, openai: !!OPENAI_KEY, elevenlabs: !!ELEVEN_KEY, model: LLM_MODEL });
+      return json(res, 200, {
+        ok: true, openai: !!OPENAI_KEY, elevenlabs: !!ELEVEN_KEY, deepgram: !!DEEPGRAM_KEY, model: LLM_MODEL,
+      });
     }
     if (req.method === 'POST' && url.pathname === '/api/roast') return await handleRoast(req, res);
     if (req.method === 'GET' && url.pathname === '/api/speak') return await handleSpeak(req, res, url);
@@ -273,8 +299,86 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+// ---------- live transcription: browser <-> this server <-> Deepgram ----------
+// The browser streams 16 kHz mono PCM here; we relay it to Deepgram and send back
+// the words as they are heard. The Deepgram key never reaches the browser.
+const DEEPGRAM_URL =
+  'wss://api.deepgram.com/v1/listen?' +
+  new URLSearchParams({
+    model: 'nova-3',
+    language: 'en',
+    encoding: 'linear16',
+    sample_rate: '16000',
+    channels: '1',
+    interim_results: 'true',
+    smart_format: 'true',
+    endpointing: '400', // ms of quiet that ends a line
+    utterance_end_ms: '1000',
+    vad_events: 'true',
+  });
+
+const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
+
+server.on('upgrade', (req, socket, head) => {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  // Same-origin only: another website must not be able to spend your Deepgram minutes.
+  const origin = req.headers.origin;
+  const sameOrigin = !origin || new URL(origin).host === req.headers.host;
+  if (url.pathname !== '/ws' || !sameOrigin) { socket.destroy(); return; }
+  wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws));
+});
+
+wss.on('connection', (client) => {
+  const send = (obj) => client.readyState === WebSocket.OPEN && client.send(JSON.stringify(obj));
+  if (!DEEPGRAM_KEY) { send({ type: 'error', message: 'DEEPGRAM_API_KEY is missing in .env' }); client.close(); return; }
+
+  const queue = []; // audio that arrives before Deepgram is connected
+  let ready = false;
+  const dg = new WebSocket(DEEPGRAM_URL, { headers: { Authorization: `Token ${DEEPGRAM_KEY}` } });
+  let keepAlive = null;
+
+  dg.on('open', () => {
+    ready = true;
+    for (const chunk of queue.splice(0)) dg.send(chunk);
+    keepAlive = setInterval(() => dg.readyState === WebSocket.OPEN && dg.send(JSON.stringify({ type: 'KeepAlive' })), 5000);
+    send({ type: 'ready' });
+  });
+
+  dg.on('message', (data) => {
+    let m;
+    try { m = JSON.parse(data.toString()); } catch { return; }
+    if (m.type === 'Results') {
+      const text = m.channel?.alternatives?.[0]?.transcript || '';
+      if (text || m.speech_final) {
+        send({ type: 'transcript', text, final: !!m.is_final, speechFinal: !!m.speech_final });
+      }
+    } else if (m.type === 'SpeechStarted') send({ type: 'speech_started' });
+    else if (m.type === 'UtteranceEnd') send({ type: 'utterance_end' });
+  });
+
+  dg.on('unexpected-response', (_req, res) => {
+    console.error('Deepgram refused the connection:', res.statusCode);
+    send({ type: 'error', message: `Deepgram refused the connection (${res.statusCode}). Check DEEPGRAM_API_KEY.` });
+    client.close();
+  });
+  dg.on('error', (err) => { console.error('Deepgram error:', err.message); send({ type: 'error', message: 'Transcription connection failed.' }); });
+  dg.on('close', () => { clearInterval(keepAlive); client.close(); });
+
+  client.on('message', (data, isBinary) => {
+    if (!isBinary) return;
+    if (!ready) { if (queue.length < 60) queue.push(data); return; }
+    if (dg.readyState === WebSocket.OPEN) dg.send(data);
+  });
+  client.on('close', () => {
+    clearInterval(keepAlive);
+    if (dg.readyState === WebSocket.OPEN) { dg.send(JSON.stringify({ type: 'CloseStream' })); dg.close(); }
+    else if (dg.readyState === WebSocket.CONNECTING) dg.terminate();
+  });
+});
+
 server.listen(PORT, HOST, () => {
   console.log(`RoastCast running at http://localhost:${PORT}`);
   console.log(`  LLM: ${OPENAI_KEY ? LLM_MODEL : 'MISSING OPENAI_API_KEY'}`);
   console.log(`  Voice: ${ELEVEN_KEY ? 'ElevenLabs (OpenAI fallback)' : OPENAI_KEY ? 'OpenAI TTS' : 'MISSING KEYS'}`);
+  console.log(`  Listening (speech-to-text): ${DEEPGRAM_KEY ? 'Deepgram nova-3' : 'MISSING DEEPGRAM_API_KEY'}`);
 });

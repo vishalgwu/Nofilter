@@ -26,7 +26,7 @@
       <span class="brand-name">RoastCast</span>
     </a>
     <div class="nav-right">
-      <span class="pill pill-muted"><span class="mono">Stage 1</span><i></i>Day 1</span>
+      <span class="pill pill-muted"><span class="mono">Stage 1</span><i></i>Day 2</span>
       <span class="status" id="status" data-state="checking" role="status" aria-live="polite">
         <span class="dot"></span><span id="statusText">Checking server</span>
       </span>
@@ -79,6 +79,19 @@
           <div class="meter" id="meter" aria-hidden="true"></div>
           <span class="mono tiny" id="micStatus">Mic off</span>
         </div>
+
+        <div class="listen-extra">
+          <label class="switch">
+            <input type="checkbox" id="autoToggle" checked>
+            <span class="track" aria-hidden="true"></span>
+            <span class="switch-text">Auto-roast when listening</span>
+          </label>
+          <span class="mono tiny" id="cooldownTag"></span>
+        </div>
+        <div class="captions" id="captions" aria-live="off" aria-label="Live transcript">
+          <span class="cap-empty">Live words appear here once you start listening.</span>
+        </div>
+        <p class="hint">Tip: use headphones so the roast does not hear itself.</p>
       </div>
 
       <!-- Stage -->
@@ -87,6 +100,8 @@
           <h2>On air</h2>
           <span class="live" id="liveTag"><span class="dot"></span><span id="liveText">Idle</span></span>
         </div>
+
+        <div class="trigger" id="trigger" hidden></div>
 
         <div class="viz-wrap">
           <canvas id="viz" aria-hidden="true"></canvas>
@@ -131,7 +146,7 @@
     </section>
 
     <section class="how" aria-label="How it works">
-      <div class="how-item"><span class="mono num">01</span><h3>You describe it</h3><p>Type what happened, or pick a moment. Live listening comes on Day 2.</p></div>
+      <div class="how-item"><span class="mono num">01</span><h3>You describe it</h3><p>Type what happened, or press Start listening and just play. It hears screams, crashes, silence and what you say.</p></div>
       <div class="how-item"><span class="mono num">02</span><h3>It writes one roast</h3><p>Fifteen words or fewer, specific to the exact moment, tuned to your level.</p></div>
       <div class="how-item"><span class="mono num">03</span><h3>It says it out loud</h3><p>A streamed voice starts speaking right away. First sound target: under 3 seconds.</p></div>
     </section>

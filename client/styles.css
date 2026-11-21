@@ -152,6 +152,29 @@ textarea::placeholder { color: var(--faint); }
 .meter span.hot { background: var(--amber); }
 .meter span.peak { background: var(--red); }
 
+.listen-extra { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; }
+.switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; font-size: 13px; color: var(--muted); user-select: none; }
+.switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.switch .track { position: relative; width: 34px; height: 20px; border-radius: 999px; background: rgba(255, 255, 255, 0.12); border: 1px solid var(--border); transition: background 0.2s, border-color 0.2s; }
+.switch .track::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #d8d8e0; transition: transform 0.25s cubic-bezier(0.3, 1.3, 0.4, 1), background 0.2s; }
+.switch input:checked + .track { background: linear-gradient(135deg, var(--amber), var(--orange)); border-color: transparent; }
+.switch input:checked + .track::after { transform: translateX(14px); background: #17110a; }
+.switch input:focus-visible + .track { outline: 2px solid var(--amber); outline-offset: 2px; }
+.switch input:checked ~ .switch-text { color: var(--text); }
+#cooldownTag { color: var(--faint); white-space: nowrap; }
+#cooldownTag.wait { color: var(--amber); }
+
+.captions { margin-top: 12px; min-height: 76px; max-height: 124px; overflow: hidden; padding: 12px 14px; border: 1px solid var(--border); border-radius: 14px; background: rgba(0, 0, 0, 0.3); display: flex; flex-direction: column; justify-content: flex-end; gap: 4px; font-size: 14.5px; line-height: 1.4; }
+.captions p { margin: 0; color: var(--text); animation: rise 0.25s ease both; }
+.captions p.partial { color: var(--faint); font-style: italic; }
+.captions p.old { color: var(--muted); }
+.cap-empty { color: var(--faint); font-size: 13.5px; }
+.hint { margin-top: 10px; font-size: 12.5px; color: var(--faint); }
+
+.trigger { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; margin: -4px 0 4px; font-size: 13px; color: var(--muted); animation: rise 0.3s ease both; }
+.trigger .tag { text-transform: none; color: #ffd9b0; border-color: rgba(255, 138, 31, 0.4); background: rgba(255, 138, 31, 0.08); }
+.trigger q { color: var(--text); quotes: '\201C' '\201D'; }
+
 /* ---------- stage ---------- */
 .stage { display: flex; flex-direction: column; overflow: hidden; }
 .stage::before { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: 0; transition: opacity 0.5s; background: radial-gradient(ellipse 70% 50% at 50% 38%, rgba(255, 110, 40, 0.18), transparent 70%); }

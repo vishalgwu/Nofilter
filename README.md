@@ -6,20 +6,36 @@ RoastCast is a web app that listens to a player or streamer in real time and ans
 
 > **Status:** Planning. The repository currently contains only the project plan ([RoastCast_Project_Plan.pdf](RoastCast_Project_Plan.pdf)). Everything below describes the intended design, and all speed figures are planning targets, not measurements.
 
-## Run it locally (Stage 1, Day 1)
+## Run it locally (Stage 1, Days 1-2)
 
-Requires Node.js 20.6 or newer. No npm install needed (zero dependencies).
+Requires Node.js 20.6 or newer.
 
 1. Copy `.env.example` to `.env` and fill in `OPENAI_API_KEY`, `ELEVENLABS_API_KEY` and `DEEPGRAM_API_KEY`.
-2. Start the server:
+2. Install the one dependency (`ws`) and start the server:
 
    ```
+   npm install
    npm start
    ```
 
-3. Open http://localhost:3000, type (or pick) a moment, choose a roast level and press **Roast me**.
+3. Open http://localhost:3000.
+   - **Type a moment** (or pick a chip), choose a roast level and press **Roast me**, or
+   - press **Start listening**, allow the microphone, and just play. Use headphones so the roast does not hear itself.
 
-Day 1 covers typed moments, the roast writer (OpenAI, 15 words max), a streamed voice (ElevenLabs, with OpenAI TTS as fallback), the mic permission and live level meter, and a per-roast speed log written to `data/timing-log.jsonl`. Live speech-to-text (Deepgram) arrives on Day 2.
+Run the detector tests with `npm test`.
+
+**Day 1:** typed moments, the roast writer (OpenAI, 15 words max), a streamed voice (ElevenLabs, with OpenAI TTS as fallback), the mic permission and level meter, and a per-roast speed log written to `data/timing-log.jsonl`.
+
+**Day 2:** the live loop. Mic audio is captured in an AudioWorklet (16 kHz, 100 ms chunks), streamed over a WebSocket to the server, and relayed to Deepgram (`nova-3`) for live captions. A moment detector in the browser (`client/detector.js`) watches loudness and words and decides when to roast:
+
+| Moment | Heard as | Cooldown |
+| --- | --- | --- |
+| Scream | about 300 ms of sustained loud audio | 10 s between roasts |
+| Crash | a short, sharp, near-clipping spike that dies away | |
+| Silence | 8 s of quiet | |
+| Speech | a spoken line of 4+ words, once the player stops talking | |
+
+The detector pauses while a roast is playing, so RoastCast never roasts its own voice. The last 30 seconds of speech go into the prompt as context.
 
 ## What success looks like
 
