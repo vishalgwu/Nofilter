@@ -1,10 +1,13 @@
-// Try the humor engine on a spread of moments and print every candidate.
-//   node --env-file=.env scripts/humor-eval.mjs           (default set)
-//   node --env-file=.env scripts/humor-eval.mjs "I fell off the map" spicy
-// Use it to tune humor/guide.md and humor/moments.json, then rate roasts with friends (Day 5).
+// Try the humor engine and print every candidate.
+//   node --env-file=.env scripts/humor-eval.mjs                      a spread of moments, Classic voice
+//   node --env-file=.env scripts/humor-eval.mjs "I fell off the map" spicy         one moment
+//   node --env-file=.env scripts/humor-eval.mjs --cast               the same moments through every character
+//   node --env-file=.env scripts/humor-eval.mjs "I fell off the map" spicy --cast  one moment, every character
+// Use it to tune humor/guide.md, humor/moments.json and humor/cast.json, then rate roasts with friends.
 
 import { writeRoast } from '../server/roaster.js';
 import { Session, countWords } from '../server/humor.js';
+import { CHARACTERS, ORDER } from '../server/cast.js';
 
 const SET = [
   ['typed', 'I drove straight into the ocean for the third time.', 'gentle'],
@@ -17,14 +20,21 @@ const SET = [
   ['crash', '', 'spicy'],
 ];
 
-const custom = process.argv[2];
-const rows = custom ? [['typed', custom, process.argv[3] || 'spicy']] : SET;
-const session = new Session(); // shared across the set so callbacks can happen
+const args = process.argv.slice(2);
+const cast = args.includes('--cast');
+const positional = args.filter((a) => !a.startsWith('--'));
+const custom = positional[0];
+const rows = custom ? [['typed', custom, positional[1] || 'spicy']] : cast ? SET.slice(0, 4) : SET;
+const characters = cast ? ORDER : ['classic'];
 
 for (const [momentType, moment, level] of rows) {
-  const ctx = { momentType, moment, transcript: '', seconds: 9 };
-  const r = await writeRoast(ctx, level, session);
-  console.log(`\n[${r.type} | ${level}] ${moment || '(' + momentType + ' detected)'}`);
-  r.candidates.forEach((c, i) => console.log(`  ${i === r.picked ? '>>' : '  '} ${c}  (${countWords(c)}w)`));
-  console.log(`  candidates ${r.candMs}ms + pick ${r.pickMs}ms (${r.pickedBy}) = ${r.llmMs}ms`);
+  console.log(`\n=== [${level}] ${moment || '(' + momentType + ' detected)'}`);
+  for (const character of characters) {
+    const session = new Session(); // a fresh session per character so they do not borrow each other's callbacks
+    const ctx = { momentType, moment, transcript: '', seconds: 9 };
+    const r = await writeRoast(ctx, level, session, undefined, character);
+    console.log(`\n  ${CHARACTERS[character].name}  (${r.type})`);
+    r.candidates.forEach((c, i) => console.log(`   ${i === r.picked ? '>>' : '  '} ${c}  (${countWords(c)}w)`));
+    console.log(`     ${r.llmMs}ms, ${r.pickedBy}`);
+  }
 }

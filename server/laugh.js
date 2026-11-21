@@ -50,6 +50,8 @@ export function analyze(rows, opts = {}) {
   const byType = group(roasts, (r) => r.momentKind || r.momentType).sort(byAvgAsc);
   const byLevel = group(roasts, (r) => r.level);
   const byMode = group(roasts, (r) => r.mode);
+  // Stage 2: which voice made people laugh? (rows from before the cast existed count as "classic")
+  const byCharacter = group(roasts, (r) => r.character || 'classic').sort(byAvgAsc);
   const byTester = group(roasts, (r) => r.tester).map((t) => ({
     ...t,
     sessions: new Set(roasts.filter((r) => r.tester === t.key).map((r) => r.session)).size,
@@ -76,7 +78,7 @@ export function analyze(rows, opts = {}) {
   return {
     roasts: roasts.length, rated: rated.length, unrated: roasts.length - rated.length,
     average, pctAtLeast2: rated.length ? Math.round((scores.filter((s) => s >= 2).length / rated.length) * 100) : null, dist,
-    byType, byLevel, byMode, byTester, speed, testers, sessions,
+    byType, byLevel, byMode, byCharacter, byTester, speed, testers, sessions,
     weakest: weakest && {
       ...weakest,
       worst: sorted.slice(0, 3).map((r) => ({ score: r.score, moment: r.moment, roast: r.roast })),

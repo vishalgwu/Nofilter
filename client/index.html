@@ -26,7 +26,7 @@
       <span class="brand-name">RoastCast</span>
     </a>
     <div class="nav-right">
-      <span class="pill pill-muted"><span class="mono">Stage 1</span><i></i>Day 5</span>
+      <span class="pill pill-muted"><span class="mono">Stage 1</span><i></i>Day 6</span>
       <span class="status" id="status" data-state="checking" role="status" aria-live="polite">
         <span class="dot"></span><span id="statusText">Checking server</span>
       </span>
@@ -67,7 +67,15 @@
 
         <div class="chips" role="group" aria-label="Quick moments" id="chips"></div>
 
-        <div class="row-label"><span>Roast level</span><span class="muted" id="levelHint"></span></div>
+        <div class="row-label"><span>Voice</span><span class="muted" id="voiceHint"></span></div>
+        <div class="cast" id="cast" role="radiogroup" aria-label="Voice">
+          <label class="cast-card" style="--c:36">
+            <input type="radio" name="character" value="auto" checked>
+            <span class="av" style="--h:36" data-icon="auto"></span><span class="nm">Auto</span>
+          </label>
+        </div>
+
+        <div class="row-label row-gap"><span>Roast level</span><span class="muted" id="levelHint"></span></div>
         <div class="seg" id="seg" role="radiogroup" aria-label="Roast level" style="--i:1">
           <span class="seg-thumb" aria-hidden="true"></span>
           <label><input type="radio" name="level" value="gentle"><span>Gentle</span></label>
@@ -116,7 +124,10 @@
       <!-- Stage -->
       <div class="card stage" id="stage" data-state="idle">
         <div class="card-head">
-          <h2>On air</h2>
+          <div class="head-left">
+            <h2>On air</h2>
+            <span class="speaker" id="speaker" hidden><span class="av av-sm" id="speakerAv"></span><span id="speakerName"></span></span>
+          </div>
           <span class="live" id="liveTag"><span class="dot"></span><span id="liveText">Idle</span></span>
         </div>
 

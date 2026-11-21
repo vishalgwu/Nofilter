@@ -64,6 +64,20 @@ The biggest remaining delay is not the roast: when you talk, it takes about 0.7 
 - **Sharing safely.** With `ACCESS_CODE` set in `.env`, the API and the microphone only work for people who opened the link ending in `?code=...`. Roasts are capped at 20 a minute and open microphones at 5 (`MAX_ROASTS_PER_MIN`, `MAX_MICS`).
 - **Cliche filter.** Roasts that use the stock phrases the humor guide bans ("official ceremony", "filed a complaint", "masterclass", ...) are dropped in code when a fresher take is available.
 
+**Day 6 (Stage 2 begins): the voice cast.** Instead of one voice there are now four characters plus the original, all defined in [humor/cast.json](humor/cast.json):
+
+| Character | Voice (ElevenLabs) | How it talks | Speaks for (in Auto) |
+| --- | --- | --- | --- |
+| The Announcer | Daniel | breathless play-by-play ("folks", "And he's...") | crash, panic |
+| Tired Friend | Roger, slowed and flattened | flat, ten words at most, opens with "Great." / "Cool." | silence |
+| Hyper Kid | Jessica, sped up | "whoa", "no way", exclamation marks | scream, lucky win |
+| Grandma | Lily, slowed and steadied | "oh dear", "sweetheart", "bless your heart" | rage quit |
+| Classic | Adam | the original single voice (for side-by-side tests) | only when picked |
+
+What each character has: a voice chosen from your account by name (falling back to matching labels, so a different account still works), its own voice tuning (speed and expressiveness), its own **writing style** so the words match the voice, a "signature" of words it must use (checked in code, so a roast that is not in voice loses to one that is), and an OpenAI fallback voice with acting direction if ElevenLabs fails. In **Auto**, the moment decides who speaks, and free text rotates through the cast without repeating. The page has a voice picker (clicking a character plays a sample of its voice), a "speaking as" tag, and a ring that takes on the character's colour. The laugh report now has a **By voice** table, which is how Stage 2 gets judged against Classic.
+
+Honest limits: your ElevenLabs account has no child or elderly voices, so the Kid and Grandma are existing voices tuned to fit. Real custom voices would come from ElevenLabs Voice Design (it adds voices to your account, so it is not done automatically). To hear every character write the same moment, run `npm run eval -- --cast`; to re-record the picker samples after changing a voice, run `node --env-file=.env scripts/make-cast-samples.mjs --force`.
+
 To tune the humor, edit the guide or the examples and run `npm run eval`, which prints every candidate and the pick for a spread of moments. Real quality is measured with friends' laugh scores (Day 5), which the page logs to `data/timing-log.jsonl` with the candidates.
 
 ## What success looks like

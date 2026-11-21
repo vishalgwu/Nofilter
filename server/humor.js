@@ -6,6 +6,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { characterSection, castExamples, dropOffVoice, voiceHint, CHARACTERS } from './cast.js';
 
 const HUMOR_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'humor');
 const GUIDE = readFileSync(path.join(HUMOR_DIR, 'guide.md'), 'utf8').trim();
@@ -82,16 +83,17 @@ function examplesFor(type) {
   return MOMENT_TYPES.map((t) => MOMENTS[t].examples[1] || MOMENTS[t].examples[0]).filter(Boolean);
 }
 
-export function buildSystemPrompt(type) {
+export function buildSystemPrompt(type, character = 'classic') {
   const m = MOMENTS[type] || MOMENTS.general;
   return [
     GUIDE,
+    characterSection(character), // empty for "classic", so the plain Stage 1 prompt is unchanged
     `## This moment: ${m.label}`,
     'Joke shapes that work for it (use a different one for each of your three roasts):',
     ...m.shapes.map((s) => `- ${s}`),
     'Hand-written examples (copy the quality and the length, never the words):',
     ...examplesFor(type).map(exampleLine),
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 }
 
 const ordinal = (n) => {
@@ -106,8 +108,10 @@ const ordinal = (n) => {
 //   quick - a single roast (fastest)
 export const MODES = ['self', 'best', 'quick'];
 
-export function buildUserPrompt(ctx, level, type, session, strict = false, mode = 'best') {
+export function buildUserPrompt(ctx, level, type, session, strict = false, mode = 'best', character = 'classic') {
   const lines = [`Roast level: ${LEVELS[level]}`, `Moment: ${describeMoment(ctx)}`];
+  // A reminder right next to the task, where the model pays the most attention
+  if (voiceHint(character)) lines.push(`Voice: every roast must sound like ${CHARACTERS[character].name}: ${voiceHint(character)}`);
   if (ctx.transcript) lines.push(`Heard in the last 30 seconds (oldest first): "${ctx.transcript}"`);
   const memory = session ? session.summary(type) : '';
   if (memory) lines.push(memory);
@@ -175,9 +179,10 @@ const grams = (s) => {
   for (let i = 0; i + 4 <= w.length; i++) out.push(w.slice(i, i + 4).join(' '));
   return out;
 };
-const EXAMPLE_GRAMS = new Set(
-  Object.values(MOMENTS).flatMap((m) => m.examples).flatMap((e) => grams(e.roast)),
-);
+const EXAMPLE_GRAMS = new Set([
+  ...Object.values(MOMENTS).flatMap((m) => m.examples).flatMap((e) => grams(e.roast)),
+  ...castExamples().flatMap((line) => grams(line)), // the characters' own sample lines too
+]);
 export const copiesExample = (c) => grams(c).some((g) => EXAMPLE_GRAMS.has(g));
 
 export function dropCopies(list) {
@@ -187,7 +192,7 @@ export function dropCopies(list) {
 
 // Tired phrases the humor guide asks the model to avoid. It still slips one in now and then,
 // so drop those candidates too (again only if a fresher one is left).
-const STOCK_RE = /\b(official ceremony|(noise )?complaint|masterclass|npcs?|wizardry|career in|career path|filed for divorce)\b/i;
+const STOCK_RE = /\b(official [a-z ]{0,20}ceremony|complaints?|masterclass|npcs?|wizardry|career (in|path)|divorce|restraining orders?)\b/i;
 export const isStock = (c) => STOCK_RE.test(c);
 
 export function dropStock(list) {
@@ -204,14 +209,14 @@ export function rulePick(list) {
 
 // "self" mode: one reply holds the three roasts AND the writer's own choice ("best": 1-3).
 // Returns the usable candidates (within 15 words, no copies) and which one won.
-export function selectSelf(raw) {
+export function selectSelf(raw, character = 'classic') {
   let best = -1;
   try {
     const n = Number(JSON.parse(raw).best);
     if (Number.isInteger(n)) best = n - 1;
   } catch { /* not JSON: no stated choice */ }
   const all = parseCandidates(raw);
-  const keep = dropStock(dropCopies(validCandidates(all)));
+  const keep = dropOffVoice(dropStock(dropCopies(validCandidates(all))), character);
   if (!keep.length) return { candidates: [], picked: -1, pickedBy: 'none' };
   if (keep.length === 1) return { candidates: keep, picked: 0, pickedBy: 'only' };
   const at = all[best] ? keep.indexOf(all[best]) : -1;
@@ -234,6 +239,7 @@ export class Session {
   constructor() {
     this.events = []; // { type, moment, roast }
     this.counts = {};
+    this.lastCharacter = null; // who spoke the previous roast (the cast rotates, never the same twice in a row)
     this.touched = Date.now();
   }
 

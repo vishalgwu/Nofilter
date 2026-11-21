@@ -36,7 +36,8 @@ const el = {
   status: $('status'), statusText: $('statusText'), toast: $('toast'), kbdHint: $('kbdHint'),
   autoToggle: $('autoToggle'), cooldownTag: $('cooldownTag'), captions: $('captions'), trigger: $('trigger'),
   testbar: $('testbar'), tester: $('tester'), sessionLabel: $('sessionLabel'), newSession: $('newSession'),
-  sessionStats: $('sessionStats'),
+  sessionStats: $('sessionStats'), cast: $('cast'), voiceHint: $('voiceHint'),
+  speaker: $('speaker'), speakerAv: $('speakerAv'), speakerName: $('speakerName'),
 };
 
 // localStorage can be blocked (private windows), so every use is wrapped.
@@ -53,6 +54,8 @@ if (testParam === '0') store.del('rc_test');
 const state = {
   level: 'spicy', busy: false, current: null, history: [], toastTimer: 0, transcript: [],
   chipType: null, // the moment type of the quick-pick chip, until the text is edited
+  character: store.get('rc_character') || 'auto', // who speaks: 'auto' lets the moment decide
+  hue: 36, // colour of the speaking character (the ring, the glow, the last word)
   testMode: store.get('rc_test') === '1',
   tester: store.get('rc_tester') || '',
   session: 1, // set below from the tester's saved session number
@@ -313,14 +316,15 @@ async function roast(auto = null) {
   try {
     const r = await post('/api/roast', {
       moment, momentType, transcript, seconds: auto?.seconds, level: state.level, mode: state.mode,
-      sessionId: state.sessionId,
+      character: state.character, sessionId: state.sessionId,
     });
     renderRoast(r.roast);
     renderTakes(r);
+    showSpeaker(r.character);
     setStat(el.statWrite, el.vWrite, r.llmMs, grade(r.llmMs, 800, 1500));
     el.replayBtn.disabled = false;
     el.copyBtn.disabled = false;
-    state.current = { id: r.id, text: r.roast, level: r.level, moment: shownMoment, momentType, llmMs: r.llmMs };
+    state.current = { id: r.id, text: r.roast, level: r.level, moment: shownMoment, momentType, llmMs: r.llmMs, character: r.character };
 
     const t = await playRoast(r.id, t0, react);
     if (t) {
@@ -331,7 +335,7 @@ async function roast(auto = null) {
       syncStageRating(state.current); // shows the "Did it make you laugh?" row, unscored
       addHistory(state.current);
       log({
-        type: 'roast', id: r.id, level: r.level, mode: r.mode, momentType, momentKind: r.type, moment: shownMoment,
+        type: 'roast', id: r.id, level: r.level, mode: r.mode, character: r.character.id, momentType, momentKind: r.type, moment: shownMoment,
         roast: r.roast, candidates: r.candidates, picked: r.picked, pickedBy: r.pickedBy,
         detectMs: auto?.detectMs, reactionMs, promptMs: r.promptMs, firstTokenMs: r.firstTokenMs,
         candMs: r.candMs, pickMs: r.pickMs, llmMs: r.llmMs,
@@ -445,9 +449,10 @@ function addHistory(item) {
   const t = document.createElement('div'); t.className = 't'; t.textContent = item.text;
   const m = document.createElement('div'); m.className = 'm';
   const tag = document.createElement('span'); tag.className = 'tag ' + item.level; tag.textContent = item.level;
+  const who = document.createElement('span'); who.textContent = item.character?.name || '';
   const w = document.createElement('span'); w.className = 'mono'; w.textContent = `first sound ${fmt(item.firstSoundMs)}`;
   const mo = document.createElement('span'); mo.textContent = item.moment.length > 54 ? item.moment.slice(0, 54) + '...' : item.moment;
-  m.append(tag, w, mo);
+  m.append(tag, ...(who.textContent ? [who] : []), w, mo);
 
   // every roast can be scored 0-3, not only the latest one
   const rate = document.createElement('div');
@@ -727,8 +732,8 @@ function draw(ts) {
     const x1 = cx + Math.cos(a) * base, y1 = cy + Math.sin(a) * base;
     const x2 = cx + Math.cos(a) * (base + len), y2 = cy + Math.sin(a) * (base + len);
     const grd = g.createLinearGradient(x1, y1, x2, y2);
-    grd.addColorStop(0, 'rgba(255,179,71,0.9)');
-    grd.addColorStop(1, 'rgba(255,61,129,0.9)');
+    grd.addColorStop(0, `hsla(${state.hue}, 95%, 62%, 0.9)`);
+    grd.addColorStop(1, `hsla(${state.hue - 45}, 90%, 58%, 0.9)`);
     g.strokeStyle = grd;
     g.lineWidth = Math.max(2, (Math.PI * 2 * base) / NB * 0.45);
     g.lineCap = 'round';
@@ -748,6 +753,74 @@ function draw(ts) {
   requestAnimationFrame(draw);
 }
 requestAnimationFrame(draw);
+
+// ---------- voice cast (Stage 2) ----------
+// The picker is drawn from /api/cast. Clicking a character selects it AND plays a short sample of
+// its voice, so you can audition the cast. "Auto" lets each moment pick who speaks.
+const ICONS = {
+  auto: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6.3 6.3l2.4 2.4M15.3 15.3l2.4 2.4M17.7 6.3l-2.4 2.4M8.7 15.3l-2.4 2.4"/>',
+  mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
+  mug: '<path d="M5 9h11v6a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V9Z"/><path d="M16 11h1.5a2.5 2.5 0 0 1 0 5H16"/><path d="M8 3c0 1.5 1 1.5 1 3M12 3c0 1.5 1 1.5 1 3"/>',
+  star: '<path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9L12 3Z"/>',
+  glasses: '<circle cx="7" cy="14" r="3.5"/><circle cx="17" cy="14" r="3.5"/><path d="M10.5 14h3M3.5 14 5 8M20.5 14 19 8"/>',
+  wave: '<path d="M8 8v8M12 5v14M16 8v8M4 11v2M20 11v2"/>',
+};
+const iconSvg = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ICONS.wave}</svg>`;
+const shortName = (n) => String(n).replace(/^The /, '');
+const AUTO_HINT = 'Each moment picks who speaks: crash and panic get the Announcer, silence the Tired Friend...';
+let castList = [];
+
+const sampleAudio = new Audio();
+function playSample(id) {
+  const c = castList.find((x) => x.id === id);
+  if (!c || state.busy || !audio.paused) return; // not while a roast is on
+  if (mic.stream) detector.setEnabled(false, performance.now()); // the mic must not roast the sample
+  sampleAudio.onended = () => setTimeout(() => { if (!state.busy && audio.paused) armDetector(); }, 1000);
+  sampleAudio.src = c.sample;
+  sampleAudio.currentTime = 0;
+  sampleAudio.play().catch(() => armDetector());
+}
+
+function setCharacter(id, { sample = false } = {}) {
+  state.character = id;
+  store.set('rc_character', id);
+  el.cast.querySelectorAll('input').forEach((i) => { i.checked = i.value === id; });
+  const c = castList.find((x) => x.id === id);
+  el.voiceHint.textContent = id === 'auto' || !c ? AUTO_HINT : c.tagline;
+  if (sample && id !== 'auto') playSample(id);
+}
+
+function renderCast(list) {
+  castList = list;
+  el.cast.querySelectorAll('.cast-card:not(:first-child)').forEach((n) => n.remove());
+  for (const c of list) {
+    const label = document.createElement('label');
+    label.className = 'cast-card';
+    label.style.setProperty('--c', c.hue);
+    label.innerHTML = `<input type="radio" name="character" value="${c.id}"><span class="av" style="--h:${c.hue}">${iconSvg(c.icon)}</span><span class="nm"></span>`;
+    label.querySelector('.nm').textContent = shortName(c.name);
+    label.title = c.tagline;
+    el.cast.appendChild(label);
+  }
+  const known = state.character === 'auto' || list.some((c) => c.id === state.character);
+  setCharacter(known ? state.character : 'auto');
+}
+
+// "Speaking as ..." on the stage, and the ring takes on the character's colour.
+function showSpeaker(c) {
+  if (!c) return;
+  state.hue = c.hue;
+  el.stage.style.setProperty('--h', c.hue);
+  el.speakerAv.style.setProperty('--h', c.hue);
+  el.speakerAv.innerHTML = iconSvg(c.icon);
+  el.speakerName.textContent = shortName(c.name);
+  el.speaker.hidden = false;
+}
+
+el.cast.addEventListener('change', (e) => setCharacter(e.target.value, { sample: true }));
+el.cast.querySelector('.av[data-icon]').innerHTML = iconSvg('auto');
+setCharacter(state.character); // Auto's hint until the list arrives
+fetch('/api/cast').then((r) => r.json()).then((d) => renderCast(d.cast || [])).catch(() => {});
 
 // ---------- test bar ----------
 el.testbar.hidden = !state.testMode;

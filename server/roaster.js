@@ -2,6 +2,7 @@
 // Writes the roast in one of three modes (see humor.js MODES) and times every step.
 
 import { chatStream } from './llm.js';
+import { dropOffVoice } from './cast.js';
 import {
   MAX_WORDS, MODES, resolveType, buildSystemPrompt, buildUserPrompt, PICK_SYSTEM, buildPickPrompt,
   parseCandidates, validCandidates, dropCopies, dropStock, selectSelf, parsePick, rulePick, capWords, cleanRoast, describeMoment,
@@ -14,26 +15,26 @@ export const defaultMode = () => (MODES.includes(process.env.ROAST_MODE) ? proce
 const fail = (message, status = 502) => Object.assign(new Error(message), { status });
 
 // One write attempt in the given mode -> { candidates, picked, pickedBy } (candidates may be empty).
-function interpret(mode, raw) {
-  if (mode === 'self') return selectSelf(raw);
+function interpret(mode, raw, character) {
+  if (mode === 'self') return selectSelf(raw, character);
   if (mode === 'quick') {
     // A single roast as plain text (if the model sent JSON anyway, take its first roast).
     const text = raw.trim().startsWith('{') ? parseCandidates(raw)[0] || '' : cleanRoast(raw);
     const keep = text ? dropStock(dropCopies(validCandidates([text]))) : [];
     return keep.length ? { candidates: keep, picked: 0, pickedBy: 'only' } : { candidates: [], picked: -1, pickedBy: 'none', loose: text };
   }
-  const keep = dropStock(dropCopies(validCandidates(parseCandidates(raw))));
+  const keep = dropOffVoice(dropStock(dropCopies(validCandidates(parseCandidates(raw)))), character);
   return { candidates: keep, picked: keep.length ? 0 : -1, pickedBy: keep.length > 1 ? 'pending' : 'only', loose: parseCandidates(raw)[0] };
 }
 
-// ctx: { momentType, moment, transcript, seconds }   level: gentle | spicy | savage
+// ctx: { momentType, moment, transcript, seconds }   level: gentle | spicy | savage   character: a cast id (cast.json)
 // session: a Session from humor.js (running jokes), or null
-export async function writeRoast(ctx, level, session = null, mode = defaultMode()) {
+export async function writeRoast(ctx, level, session = null, mode = defaultMode(), character = 'classic') {
   if (!MODES.includes(mode)) mode = defaultMode();
 
   const tp = performance.now();
   const type = resolveType(ctx);
-  const system = buildSystemPrompt(type);
+  const system = buildSystemPrompt(type, character); // the character shapes how the roast is written
   const promptMs = Math.round(performance.now() - tp);
 
   // 1) the writing call
@@ -43,11 +44,11 @@ export async function writeRoast(ctx, level, session = null, mode = defaultMode(
   let loose = '';
   for (let attempt = 0; attempt < 2 && !result.candidates.length; attempt++) {
     const out = await chatStream({
-      model: MODEL(), system, user: buildUserPrompt(ctx, level, type, session, attempt === 1, mode),
+      model: MODEL(), system, user: buildUserPrompt(ctx, level, type, session, attempt === 1, mode, character),
       maxTokens: mode === 'quick' ? 60 : 240, temperature: 1, json: mode !== 'quick', timeoutMs: 9000,
     });
     firstTokenMs = firstTokenMs || out.firstTokenMs;
-    result = interpret(mode, out.text);
+    result = interpret(mode, out.text, character);
     loose = result.loose || loose;
   }
   if (!result.candidates.length) {
@@ -79,7 +80,7 @@ export async function writeRoast(ctx, level, session = null, mode = defaultMode(
   const text = valid[picked];
   session?.record(type, ctx.moment || describeMoment(ctx), text);
   return {
-    text, candidates: valid, picked, pickedBy, type, mode,
+    text, candidates: valid, picked, pickedBy, type, mode, character,
     promptMs, firstTokenMs, candMs, pickMs, llmMs: candMs + pickMs,
     words: text.split(/\s+/).length, maxWords: MAX_WORDS,
   };
