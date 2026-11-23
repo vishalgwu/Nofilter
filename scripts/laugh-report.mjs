@@ -51,6 +51,7 @@ md += table('By moment type (weakest first)', a.byType, 'moment type');
 md += table('By roast level', a.byLevel, 'level');
 md += table('By roast style', a.byMode, 'style');
 md += table('By voice (the cast vs the single Classic voice)', a.byCharacter, 'voice');
+md += table('By sound (layered = effects + a second voice + a sting; plain = one reaction)', a.bySound, 'sound');
 md += `\n### By tester\n\n| tester | sessions | roasts | rated | avg laugh |\n| --- | --- | --- | --- | --- |\n`;
 for (const t of a.byTester) md += `| ${t.key} | ${t.sessions} | ${t.roasts} | ${t.rated} | ${fmt(t.avg)} |\n`;
 

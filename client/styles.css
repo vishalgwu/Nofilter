@@ -193,6 +193,19 @@ textarea::placeholder { color: var(--faint); }
 .trigger .tag { text-transform: none; color: #ffd9b0; border-color: rgba(255, 138, 31, 0.4); background: rgba(255, 138, 31, 0.08); }
 .trigger q { color: var(--text); quotes: '\201C' '\201D'; }
 
+.layers-hint { color: var(--faint); text-align: right; }
+
+/* ---------- what layered into the roast (Stage 2) ---------- */
+.mixline { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 4px; margin: 2px 0 8px; }
+.mix-step { position: relative; padding: 3px 9px; font-family: var(--mono); font-size: 11.5px; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; background: var(--surface); animation: rise 0.3s ease both; }
+.mix-step + .mix-step { margin-left: 10px; }
+.mix-step + .mix-step::before { content: ''; position: absolute; left: -9px; top: 50%; width: 7px; height: 1px; background: var(--faint); }
+.mix-voice { color: #ffd0dc; border-color: rgba(255, 61, 129, 0.35); }
+.mix-sfx { color: #ffe1b8; border-color: rgba(255, 179, 71, 0.35); }
+.mix-sting { color: #ffe1b8; border-color: rgba(255, 179, 71, 0.35); }
+.mix-roast { color: var(--text); border-color: hsl(var(--h, 36) 95% 62% / 0.6); background: hsl(var(--h, 36) 95% 60% / 0.1); }
+.mixline[hidden] { display: none; }
+
 /* ---------- stage ---------- */
 .stage { display: flex; flex-direction: column; overflow: hidden; }
 .stage::before { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: 0; transition: opacity 0.5s; background: radial-gradient(ellipse 70% 50% at 50% 38%, hsl(var(--h, 30) 100% 55% / 0.18), transparent 70%); }

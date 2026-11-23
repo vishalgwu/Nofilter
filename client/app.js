@@ -3,7 +3,9 @@
 // Also: mic permission + live input-level meter (ready for Day 2).
 
 import { MomentDetector } from './detector.js';
-import { SOUNDS, pickReaction } from './fastlane.js';
+import { pickReaction } from './fastlane.js';
+import { bankFiles, pickPre, pickBed, pickSting } from './soundbank.js';
+import { Mixer } from './mixer.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -38,6 +40,7 @@ const el = {
   testbar: $('testbar'), tester: $('tester'), sessionLabel: $('sessionLabel'), newSession: $('newSession'),
   sessionStats: $('sessionStats'), cast: $('cast'), voiceHint: $('voiceHint'),
   speaker: $('speaker'), speakerAv: $('speakerAv'), speakerName: $('speakerName'),
+  mixLine: $('mixLine'), layersToggle: $('layersToggle'), layersHint: $('layersHint'),
 };
 
 // localStorage can be blocked (private windows), so every use is wrapped.
@@ -56,6 +59,8 @@ const state = {
   chipType: null, // the moment type of the quick-pick chip, until the text is edited
   character: store.get('rc_character') || 'auto', // who speaks: 'auto' lets the moment decide
   hue: 36, // colour of the speaking character (the ring, the glow, the last word)
+  layers: store.get('rc_layers') !== '0', // Stage 2: sound layers on (default) or just the single reaction
+  byMoment: {}, // which character Auto uses for each moment type (from /api/cast)
   testMode: store.get('rc_test') === '1',
   tester: store.get('rc_tester') || '',
   session: 1, // set below from the tester's saved session number
@@ -91,6 +96,7 @@ const audio = new Audio();
 audio.preload = 'auto';
 let ctx = null;
 let playAnalyser = null;
+let mixer = null; // plays the sound bank layers (mixer.js)
 
 function ensureAudioContext() {
   if (!ctx) {
@@ -102,47 +108,46 @@ function ensureAudioContext() {
     playAnalyser.smoothingTimeConstant = 0.8;
     src.connect(playAnalyser);
     playAnalyser.connect(ctx.destination);
+    mixer = new Mixer(ctx, playAnalyser);
   }
   if (ctx.state === 'suspended') ctx.resume();
 }
 
-// ---------- fast lane: an instant reaction while the roast is still being written ----------
-// The sounds are decoded into memory at page load, so playing one takes a few milliseconds.
-const reactionBuffers = {};
+// ---------- sound layers (Stage 2) ----------
+// Every sound in the bank is decoded into memory at page load, so starting a layer takes a few milliseconds.
+// A roast is a small score: an opening sound at t = 0 (it never delays anything), a one-word interjection from
+// ANOTHER character a moment later, a quiet bed under the roast (some moments), and a sting after the last word.
+const lastLayers = { open: null, line: null, sting: null }; // never the same sound twice in a row
 let lastReaction = null;
+let bedHandle = null;
+const GAME_MOMENTS = ['crash', 'scream', 'silence', 'lucky_win', 'rage_quit', 'panic'];
+const soundTypeOf = (momentType) => (GAME_MOMENTS.includes(momentType) ? momentType : 'general');
 
-async function preloadReactions() {
+async function preloadBank() {
   ensureAudioContext(); // created suspended is fine: decoding does not need it running
-  await Promise.all(Object.keys(SOUNDS).map(async (name) => {
-    try {
-      const res = await fetch(`sounds/${name}.mp3`);
-      reactionBuffers[name] = await ctx.decodeAudioData(await res.arrayBuffer());
-    } catch { /* a missing sound just means no reaction for that slot */ }
-  }));
+  await mixer.load(bankFiles());
 }
 
+// "Sound layers" OFF: just the single reaction from Day 4.
 function playReaction(type) {
   const name = pickReaction(type, lastReaction);
-  const buf = reactionBuffers[name];
-  if (!buf || !ctx) return null;
+  const h = mixer?.start(name, { gain: 0.9 });
+  if (!h) return null;
   lastReaction = name;
-  const src = ctx.createBufferSource();
-  src.buffer = buf;
-  const gain = ctx.createGain();
-  gain.gain.value = 0.9;
-  src.connect(gain).connect(playAnalyser); // through the analyser so the ring reacts too
-  src.start();
+  return { picks: [], startedAt: h.startsAt, ended: h.ended, fadeOut: (ms) => h.stop(ms) };
+}
+
+// "Sound layers" ON: the opening layers, started the instant the roast is triggered.
+function startPre(soundType, main) {
+  const picks = pickPre({ type: soundType, main, level: state.level, last: lastLayers });
+  const started = picks.map((p) => ({ p, h: mixer.start(p.id, { at: p.at, gain: p.gain }) })).filter((x) => x.h);
+  if (!started.length) return null;
+  for (const { p } of started) lastLayers[p.kind === 'voice' ? 'line' : 'open'] = p.id;
   return {
-    name,
-    startedAt: performance.now(),
-    ended: new Promise((resolve) => { src.onended = resolve; }),
-    // The roast arrives: fade the reaction out instead of talking over it.
-    fadeOut(ms = 90) {
-      try {
-        gain.gain.setTargetAtTime(0, ctx.currentTime, ms / 3000);
-        src.stop(ctx.currentTime + ms / 1000 + 0.05);
-      } catch { /* already finished */ }
-    },
+    picks: started.map((x) => x.p),
+    startedAt: started[0].h.startsAt,
+    ended: Promise.all(started.map((x) => x.h.ended)),
+    fadeOut: (ms) => started.forEach((x) => x.h.stop(ms)), // the roast arrives: fade the openers out, never talk over them
   };
 }
 
@@ -231,6 +236,17 @@ function setMode(mode) {
 }
 el.modeSeg.addEventListener('change', (e) => setMode(e.target.value));
 setMode(state.mode);
+
+// "Sound layers": the full score (effects, a second voice, a sting) or just one quick reaction.
+// Switching it off is how a layered roast is compared with a plain one.
+function setLayers(on) {
+  state.layers = on;
+  store.set('rc_layers', on ? '1' : '0');
+  el.layersToggle.checked = on;
+  el.layersHint.textContent = on ? 'effects, a second voice and a sting' : 'one quick reaction only';
+}
+el.layersToggle.addEventListener('change', () => setLayers(el.layersToggle.checked));
+setLayers(state.layers);
 updateCount();
 
 // ---------- roast flow ----------
@@ -250,12 +266,24 @@ function renderRoast(text) {
 }
 
 // After the roast ends, wait a beat (so the speaker tail is not heard) and listen again.
-function afterSpeak() {
-  setStage('idle', 'Idle');
-  setTimeout(() => { if (!state.busy && audio.paused) armDetector(); }, 1000);
+function afterSpeak(extras = null) {
+  bedHandle?.stop(250);
+  bedHandle = null;
+  let tailMs = 0;
+  const sting = extras?.sting;
+  const h = sting && mixer?.start(sting.id, { at: sting.at, gain: sting.gain });
+  if (h) {
+    tailMs = Math.max(0, h.endsAt - performance.now());
+    setStage('speaking', 'Sting');
+    h.ended.then(() => { if (el.liveText.textContent === 'Sting') setStage('idle', 'Idle'); });
+  } else {
+    setStage('idle', 'Idle');
+  }
+  // wait for the sting too, so the microphone never hears our own sound effects
+  setTimeout(() => { if (!state.busy && audio.paused) armDetector(); }, 1000 + tailMs);
 }
 
-function playRoast(id, t0, react = null) {
+function playRoast(id, t0, react = null, extras = null) {
   ensureAudioContext();
   detector.setEnabled(false, performance.now()); // never roast our own voice
   return new Promise((resolve) => {
@@ -264,11 +292,12 @@ function playRoast(id, t0, react = null) {
     const finish = (res) => { if (!done) { done = true; resolve(res); } };
     audio.onplaying = () => {
       const now = performance.now();
-      react?.fadeOut(); // hand over from the reaction to the roast
+      react?.fadeOut(); // hand over from the opening layers to the roast
+      if (extras?.bed) bedHandle = mixer?.start(extras.bed.id, { gain: extras.bed.gain });
       setStage('speaking', 'Speaking');
       finish({ voiceMs: now - tStart, roastStartMs: now - t0 });
     };
-    audio.onended = afterSpeak;
+    audio.onended = () => afterSpeak(extras);
     audio.onerror = () => { afterSpeak(); toast('The voice could not play. Check the server log.'); finish(null); };
     audio.src = `/api/speak?id=${encodeURIComponent(id)}&_=${Date.now()}`;
     audio.play().catch((err) => { afterSpeak(); toast('Audio was blocked: ' + err.message); finish(null); });
@@ -295,7 +324,10 @@ async function roast(auto = null) {
 
   // FAST LANE: the reaction plays before anything slow happens.
   audio.pause();
-  const react = playReaction(momentType);
+  const soundType = soundTypeOf(momentType);
+  // who will probably speak (so the interjection comes from someone else); Auto follows the moment
+  const predictedMain = state.character !== 'auto' ? state.character : state.byMoment[soundType] || null;
+  const react = state.layers ? startPre(soundType, predictedMain) : playReaction(momentType);
   const reactionMs = react ? Math.round(react.startedAt - t0) : null;
   if (react) {
     setStage('speaking', 'Reaction');
@@ -321,12 +353,18 @@ async function roast(auto = null) {
     renderRoast(r.roast);
     renderTakes(r);
     showSpeaker(r.character);
+    // now the real moment type is known: pick the bed under the roast and the sting after it
+    const extras = state.layers
+      ? { bed: pickBed({ type: r.type, level: state.level }), sting: pickSting({ type: r.type, level: state.level, last: lastLayers }) }
+      : null;
+    if (extras?.sting) lastLayers.sting = extras.sting.id;
+    showMixLine(state.layers ? react?.picks || [] : null, extras, r.character);
     setStat(el.statWrite, el.vWrite, r.llmMs, grade(r.llmMs, 800, 1500));
     el.replayBtn.disabled = false;
     el.copyBtn.disabled = false;
     state.current = { id: r.id, text: r.roast, level: r.level, moment: shownMoment, momentType, llmMs: r.llmMs, character: r.character };
 
-    const t = await playRoast(r.id, t0, react);
+    const t = await playRoast(r.id, t0, react, extras);
     if (t) {
       setStat(el.statVoice, el.vVoice, t.voiceMs, grade(t.voiceMs, 400, 1000));
       setStat(el.statFirst, el.vFirst, t.roastStartMs, grade(t.roastStartMs));
@@ -340,6 +378,8 @@ async function roast(auto = null) {
         detectMs: auto?.detectMs, reactionMs, promptMs: r.promptMs, firstTokenMs: r.firstTokenMs,
         candMs: r.candMs, pickMs: r.pickMs, llmMs: r.llmMs,
         voiceMs: Math.round(t.voiceMs), roastStartMs: Math.round(t.roastStartMs),
+        layered: state.layers,
+        layers: state.layers ? [...(react?.picks || []).map((x) => x.id), extras?.bed?.id, extras?.sting?.id].filter(Boolean) : [],
       });
     }
   } catch (err) {
@@ -353,6 +393,25 @@ async function roast(auto = null) {
   }
 }
 el.roastBtn.addEventListener('click', () => roast());
+
+// What layered into this roast, in order: openers, the roast voice (over its bed), the sting.
+// `pre` is null when Sound layers is off.
+function showMixLine(pre, extras, c) {
+  el.mixLine.innerHTML = '';
+  if (pre == null) { el.mixLine.hidden = true; return; }
+  const steps = [
+    ...pre.map((p) => ({ k: p.kind, t: p.label })),
+    { k: 'roast', t: `Roast: ${shortName(c.name)}${extras?.bed ? ` over ${extras.bed.label}` : ''}` },
+    ...(extras?.sting ? [{ k: 'sting', t: extras.sting.label }] : []),
+  ];
+  for (const s of steps) {
+    const sp = document.createElement('span');
+    sp.className = `mix-step mix-${s.k}`;
+    sp.textContent = s.t;
+    el.mixLine.appendChild(sp);
+  }
+  el.mixLine.hidden = false;
+}
 
 // "Other takes": every candidate the writer produced, and which one the pick step chose.
 function renderTakes(r) {
@@ -820,7 +879,7 @@ function showSpeaker(c) {
 el.cast.addEventListener('change', (e) => setCharacter(e.target.value, { sample: true }));
 el.cast.querySelector('.av[data-icon]').innerHTML = iconSvg('auto');
 setCharacter(state.character); // Auto's hint until the list arrives
-fetch('/api/cast').then((r) => r.json()).then((d) => renderCast(d.cast || [])).catch(() => {});
+fetch('/api/cast').then((r) => r.json()).then((d) => { state.byMoment = d.byMoment || {}; renderCast(d.cast || []); }).catch(() => {});
 
 // ---------- test bar ----------
 el.testbar.hidden = !state.testMode;
@@ -829,7 +888,7 @@ state.session = Number(store.get('rc_session_' + state.tester)) || 1;
 updateSessionUI();
 
 // ---------- warm up: do the slow one-time work before the first roast ----------
-preloadReactions();
+preloadBank();
 fetch('/api/warm', { method: 'POST' }).catch(() => {});
 
 // ---------- server status ----------

@@ -26,7 +26,7 @@
       <span class="brand-name">RoastCast</span>
     </a>
     <div class="nav-right">
-      <span class="pill pill-muted"><span class="mono">Stage 1</span><i></i>Day 6</span>
+      <span class="pill pill-muted"><span class="mono">Stage 1</span><i></i>Day 7</span>
       <span class="status" id="status" data-state="checking" role="status" aria-live="polite">
         <span class="dot"></span><span id="statusText">Checking server</span>
       </span>
@@ -90,6 +90,15 @@
           <label><input type="radio" name="mode" value="quick"><span>Quick</span></label>
         </div>
 
+        <div class="listen-extra row-gap">
+          <label class="switch">
+            <input type="checkbox" id="layersToggle" checked>
+            <span class="track" aria-hidden="true"></span>
+            <span class="switch-text">Sound layers</span>
+          </label>
+          <span class="mono tiny layers-hint" id="layersHint"></span>
+        </div>
+
         <div class="actions">
           <button class="btn btn-primary" id="roastBtn" type="button">
             <span class="btn-label">Roast me</span>
@@ -139,6 +148,8 @@
             <p class="roast-empty" id="roastEmpty">Your roast shows up here.</p>
           </div>
         </div>
+
+        <div class="mixline" id="mixLine" hidden aria-label="Sound layers in this roast"></div>
 
         <details class="takes" id="takes" hidden>
           <summary><span id="takesSummary">Other takes</span></summary>

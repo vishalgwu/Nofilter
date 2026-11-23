@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 import { writeRoast, defaultMode } from './roaster.js';
 import { startSpeech, getSpeech, warmSpeech, voiceName } from './speech.js';
-import { CHARACTERS, publicCast, resolveCharacter } from './cast.js';
+import { CHARACTERS, BY_MOMENT, publicCast, resolveCharacter } from './cast.js';
 import { ACCEPTED_TYPES, LEVELS, MODES, SessionStore, countWords, resolveType } from './humor.js';
 import { isAuthorized, accessCookie, codeMatches, RateLimiter } from './guard.js';
 
@@ -123,7 +123,7 @@ async function handleRoast(req, res) {
 async function handleLog(req, res) {
   const body = await readBody(req);
   const allowed = ['id', 'type', 'level', 'momentType', 'momentKind', 'moment', 'roast', 'picked', 'pickedBy', 'mode', 'character',
-    'detectMs', 'reactionMs', 'promptMs', 'firstTokenMs', 'candMs', 'pickMs', 'llmMs', 'voiceMs', 'roastStartMs',
+    'layered', 'detectMs', 'reactionMs', 'promptMs', 'firstTokenMs', 'candMs', 'pickMs', 'llmMs', 'voiceMs', 'roastStartMs',
     'firstSoundMs', 'laughScore'];
   const row = { ts: new Date().toISOString() };
   for (const k of allowed) if (body[k] !== undefined) row[k] = body[k];
@@ -132,6 +132,7 @@ async function handleLog(req, res) {
   if (body.tester) row.tester = short(body.tester, 40);
   if (body.sessionId) row.sessionId = short(body.sessionId, 64);
   if (Number.isFinite(Number(body.session))) row.session = Math.max(1, Math.min(999, Math.round(Number(body.session))));
+  if (Array.isArray(body.layers)) row.layers = body.layers.slice(0, 8).map((x) => String(x).slice(0, 40)); // sound ids used
   if (Array.isArray(body.candidates)) row.candidates = body.candidates.slice(0, 5).map((c) => String(c).slice(0, 120));
   const job = body.id && getSpeech(String(body.id));
   if (job) { row.ttsFirstByteMs = job.firstByteMs; row.voiceProvider = job.provider; } // measured on the server
@@ -191,7 +192,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname.startsWith('/api/') && !authorized) {
       return json(res, 401, { error: 'Access code needed. Open the link your host sent you.' });
     }
-    if (req.method === 'GET' && url.pathname === '/api/cast') return json(res, 200, { cast: publicCast() });
+    if (req.method === 'GET' && url.pathname === '/api/cast') return json(res, 200, { cast: publicCast(), byMoment: BY_MOMENT });
     if (req.method === 'POST' && url.pathname === '/api/warm') return json(res, 200, await warmUp());
     if (req.method === 'POST' && url.pathname === '/api/roast') return await handleRoast(req, res);
     if (req.method === 'GET' && url.pathname === '/api/speak') return await handleSpeak(req, res, url);

@@ -78,6 +78,21 @@ What each character has: a voice chosen from your account by name (falling back 
 
 Honest limits: your ElevenLabs account has no child or elderly voices, so the Kid and Grandma are existing voices tuned to fit. Real custom voices would come from ElevenLabs Voice Design (it adds voices to your account, so it is not done automatically). To hear every character write the same moment, run `npm run eval -- --cast`; to re-record the picker samples after changing a voice, run `node --env-file=.env scripts/make-cast-samples.mjs --force`.
 
+**Day 7 (Stage 2): the sound bank and the layered mixer.** A roast is now a small score instead of one sound:
+
+| When | Layer | Example |
+| --- | --- | --- |
+| 0 ms (the instant it is triggered) | an opening sound | tire screech, gasp, drum roll, record scratch |
+| about 300 ms | a one-word interjection from **another** character than the one speaking the roast | the Kid's "Whoa!" before the Announcer's punchline |
+| with the roast | an optional quiet bed (a silence gets tumbleweed) | tumbleweed under the Tired Friend |
+| just after the last word | a sting, for about 7 roasts in 10 | rimshot, sad trombone, air horn, crowd laugh |
+
+- **The sound bank** ([client/soundbank.js](client/soundbank.js)): 24 effects and 14 interjections, each tagged by moment type, level (gentle sounds soft, savage sounds big) and role (open, sting, bed). The picker never repeats the same sound twice in a row. Effects are made with `node --env-file=.env scripts/make-sounds.mjs`, interjections (recorded in each character's own voice) with `scripts/make-voice-lines.mjs`; the mp3 files in `client/sounds/` and `client/voices/` are committed.
+- **The mixer** ([client/mixer.js](client/mixer.js)): schedules layers on the Web Audio timeline. The first layer always starts at time zero, so layering cannot delay the first sound, and the opening layers fade out the moment the roast voice arrives rather than talking over it. Listening resumes only after the sting has finished, so the microphone never hears our own effects.
+- **The page** shows exactly what layered into each roast (for example `Drum roll > Grandma: "Bless." > Roast: Hyper Kid > Record scratch`), and has a **Sound layers** switch. With it off you get just the single Day 4 reaction, which is how layered and plain roasts get compared. The laugh report has a **By sound** table for that comparison.
+- **Speed:** layering costs nothing measurable. In warm runs the browser's voice time was the same with and without layers (246 vs 250 ms), and every roast started in under 3 s.
+- **A bug found and fixed:** the leveling step used on the Day 4 reaction sounds (`ffmpeg loudnorm`) silently cut 1.2 s clips down to 0.8 s and left no fade-out. `scripts/audio-polish.mjs` now levels with a plain gain, limits peaks, fades the end, and refuses to keep any file that comes out shorter. The old reactions were re-leveled with it (`make-sounds.mjs --repolish`, free).
+
 To tune the humor, edit the guide or the examples and run `npm run eval`, which prints every candidate and the pick for a spread of moments. Real quality is measured with friends' laugh scores (Day 5), which the page logs to `data/timing-log.jsonl` with the candidates.
 
 ## What success looks like
